@@ -1,0 +1,18 @@
+ALTER TABLE app.organizations ADD COLUMN status text NOT NULL DEFAULT 'active' CHECK(status IN ('pending','active','suspended','closed')), ADD COLUMN version integer NOT NULL DEFAULT 0, ADD COLUMN contact_email text NOT NULL DEFAULT '', ADD COLUMN contact_phone text NOT NULL DEFAULT '', ADD COLUMN notes text NOT NULL DEFAULT '', ADD COLUMN responsible_user_id uuid;
+UPDATE app.organizations SET status=CASE WHEN active THEN 'active' ELSE 'suspended' END;
+ALTER TABLE app.organizations ADD CONSTRAINT organization_status_active CHECK(active=(status='active'));
+ALTER TABLE app.memberships ADD COLUMN active boolean NOT NULL DEFAULT true, ADD COLUMN version integer NOT NULL DEFAULT 0;
+UPDATE app.organizations o SET responsible_user_id=(SELECT m.user_id FROM app.memberships m JOIN app.users u ON u.id=m.user_id WHERE m.organization_id=o.id AND m.active AND u.active LIMIT 1) WHERE (SELECT count(*) FROM app.memberships m JOIN app.users u ON u.id=m.user_id WHERE m.organization_id=o.id AND m.active AND u.active)=1;
+ALTER TABLE app.organizations ADD CONSTRAINT organization_responsible_membership FOREIGN KEY(id,responsible_user_id) REFERENCES app.memberships(organization_id,user_id);
+CREATE TABLE app.organization_invitations(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),organization_id uuid NOT NULL REFERENCES app.organizations(id),email text NOT NULL CHECK(email=lower(email)),token_hash text UNIQUE NOT NULL,status text NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','accepted','cancelled')),initial_responsible boolean NOT NULL DEFAULT false,version integer NOT NULL DEFAULT 0,expires_at timestamptz NOT NULL DEFAULT now()+interval '24 hours',created_at timestamptz NOT NULL DEFAULT now(),accepted_by uuid REFERENCES app.users(id));
+CREATE UNIQUE INDEX organization_pending_invitation ON app.organization_invitations(organization_id,email) WHERE status='pending';
+CREATE TABLE app.invitation_outbox(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),invitation_id uuid NOT NULL REFERENCES app.organization_invitations(id),token_hash text NOT NULL,token_cipher text,delivery_status text NOT NULL DEFAULT 'pending' CHECK(delivery_status IN ('pending','sending','sent','failed','cancelled')),attempts integer NOT NULL DEFAULT 0,next_attempt_at timestamptz NOT NULL DEFAULT now(),lease_until timestamptz,created_at timestamptz NOT NULL DEFAULT now());
+CREATE INDEX ON app.invitation_outbox(next_attempt_at) WHERE delivery_status IN ('pending','sending');
+CREATE TABLE app.platform_commands(actor_id uuid NOT NULL REFERENCES app.users(id),command_id uuid NOT NULL,operation text NOT NULL,body_hash text NOT NULL,response jsonb NOT NULL,created_at timestamptz NOT NULL DEFAULT now(),PRIMARY KEY(actor_id,command_id));
+ALTER TABLE app.platform_audit ADD COLUMN organization_id uuid REFERENCES app.organizations(id),ADD COLUMN resource_id uuid,ADD COLUMN details jsonb NOT NULL DEFAULT '{}';
+GRANT SELECT,INSERT,UPDATE ON app.organizations,app.memberships,app.organization_invitations,app.invitation_outbox TO cronocheckpoint_platform;
+GRANT INSERT ON app.users TO cronocheckpoint_platform;
+GRANT SELECT,INSERT,DELETE ON app.platform_commands TO cronocheckpoint_platform;
+GRANT SELECT ON app.events,app.checkpoints,app.observations TO cronocheckpoint_platform;
+GRANT SELECT ON app.checkpoint_credentials,app.checkpoint_sessions TO cronocheckpoint_platform;
+GRANT UPDATE(revoked_at) ON app.checkpoint_credentials,app.checkpoint_sessions TO cronocheckpoint_platform;

@@ -1,0 +1,25 @@
+{
+ auto_https off
+}
+:80 {
+ header {
+  X-Content-Type-Options nosniff
+  Referrer-Policy no-referrer
+  X-Frame-Options DENY
+  Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+ }
+ @private path /api/v1/operations/*
+ handle @private {
+  respond 404
+ }
+ handle /api/* {
+  reverse_proxy {$API_UPSTREAM}
+ }
+ @shell path /sw.js /index.html /checkpoint /manifest.webmanifest
+ header @shell Cache-Control "no-cache"
+ handle {
+  root * /srv
+  try_files {path} /index.html
+  file_server
+ }
+}

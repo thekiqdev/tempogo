@@ -1,0 +1,21 @@
+{
+ auto_https disable_redirects
+ skip_install_trust
+}
+https://localhost {
+ tls internal
+ header {
+  X-Content-Type-Options nosniff
+  Referrer-Policy no-referrer
+  X-Frame-Options DENY
+  Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+ }
+ handle /api/* {
+  reverse_proxy api:3001
+ }
+ handle {
+  root * /srv
+  try_files {path} /index.html
+  file_server
+ }
+}

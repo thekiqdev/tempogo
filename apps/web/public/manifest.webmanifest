@@ -1,0 +1,17 @@
+{
+  "name": "TempoGo — Captura",
+  "short_name": "TempoGo",
+  "start_url": "/checkpoint",
+  "scope": "/checkpoint",
+  "display": "standalone",
+  "background_color": "#f3f5f7",
+  "theme_color": "#176b59",
+  "icons": [
+    {
+      "src": "/checkpoint-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

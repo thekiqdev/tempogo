@@ -1,0 +1,109 @@
+{
+  "recorded_at": "2026-09-24T15:34:38.507Z",
+  "scope": "Local technical acceptance; external deployment pending",
+  "checks": {
+    "lint": true,
+    "types": true,
+    "build": true,
+    "unit": {
+      "passed": 13,
+      "failed": 0
+    },
+    "integration": {
+      "passed": 71,
+      "failed": 0
+    }
+  },
+  "productionImageBuilds": {
+    "api": "sha256:1e1d9008d674dea7300794cb963a8e047372da429ecb507bb263fca13baec0c0",
+    "web": "sha256:8e55f3a5413dc86624e3ef77bd3408641b5704c6a8c686b4370db901fd7907c1"
+  },
+  "results": {
+    "platform": {
+      "passed": true,
+      "localSMTP": true,
+      "offlineSuspensionRecovery": true,
+      "twoOrganizationsTwoSuperAdmins": true,
+      "realPostgres": true,
+      "realBrowser": "153.0.4234.48",
+      "organizationInvitationActivationSuspensionReactivation": true,
+      "viewport360": true,
+      "errors": []
+    },
+    "offlineSuspension": {
+      "passed": true,
+      "base": "http://127.0.0.1:58412",
+      "count": 100,
+      "offlineSeconds": 4,
+      "requestedOfflineMinutes": 0,
+      "localFeedbackP95Ms": 47.91179999999986,
+      "mobileWidth": 390,
+      "unchangedPayloads": true,
+      "uniqueRemoteIds": 100,
+      "revokedUploadAttempts": 0,
+      "browser": "153.0.4234.48",
+      "javascriptErrors": []
+    },
+    "migrationRestore": {
+      "passed": true,
+      "upgradeFrom": "006",
+      "applied": [
+        "007_platform_identity.sql",
+        "008_platform_password_audit.sql",
+        "009_organization_lifecycle.sql",
+        "010_platform_accounts.sql"
+      ],
+      "preservedLegacyData": true,
+      "restoredLogicalBackup": true,
+      "mfaRequiresExternalKey": true,
+      "idempotentMigrations": true,
+      "backupSha256": "9ef0cc1c0f8c4fcb222b623ceb947a5546b4bc77842a76cf14a7a1b6b255dc28",
+      "recordedAt": "2026-09-24T14:35:33.747Z"
+    },
+    "maintenance": {
+      "passed": true,
+      "strategy": "maintenance and forward recovery; no legacy authorization image",
+      "preservedObservations": true,
+      "images": {
+        "api": "sha256:6e77b6f75ac3c8590a3e06efc5fe3b772587d4963f74a9d9ba998e99504e0ef0",
+        "web": "sha256:07314bcebd05ec3415578dc690c4d0bd8d1d25e137d9eadfa0d9e7c2232d2156"
+      },
+      "recordedAt": "2026-09-24T14:41:33.225Z"
+    },
+    "authentication": {
+      "passed": true,
+      "realPostgres": true,
+      "realBrowser": "153.0.4234.48",
+      "bootstrapResetEnrollmentLoginLogout": true,
+      "viewport360": true,
+      "errors": []
+    },
+    "offlineHTTPS": {
+      "passed": true,
+      "base": "https://localhost:5443",
+      "count": 100,
+      "offlineSeconds": 4,
+      "requestedOfflineMinutes": 0,
+      "localFeedbackP95Ms": 43.8139000000001,
+      "mobileWidth": 390,
+      "unchangedPayloads": true,
+      "uniqueRemoteIds": 100,
+      "revokedUploadAttempts": 0,
+      "browser": "153.0.4234.48",
+      "javascriptErrors": []
+    },
+    "managementHTTPS": {
+      "passed": true,
+      "base": "https://localhost:5443",
+      "journey": "operator-request-review-lostresponse-retry-filter-csv-reconcile-finalize-reopen-audit",
+      "javascriptErrors": []
+    }
+  },
+  "remaining": [
+    "VPS deployment and HTTPS",
+    "Real SMTP",
+    "External backup and alerts",
+    "Named operational owners",
+    "Physical phones and real race"
+  ]
+}

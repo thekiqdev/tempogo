@@ -1,0 +1,68 @@
+{
+  "recorded_at": "2026-09-24T21:15:03.056Z",
+  "candidate": "super-admin-ux-fab426c05d49",
+  "source_sha256": "fab426c05d4938b0c58f26dae7510fd6671a766d4379edd38d53d252920074fa",
+  "scope": "Aceite técnico local da reorganização CRM; deploy e aceite humano pendentes",
+  "checks": {
+    "lint": true,
+    "types": true,
+    "build": true,
+    "unit": {
+      "passed": 13,
+      "failed": 0
+    },
+    "integration": {
+      "passed": 71,
+      "failed": 0
+    }
+  },
+  "results": {
+    "authenticationAndNavigation": {
+      "passed": true,
+      "realPostgres": true,
+      "realBrowser": "153.0.4234.48",
+      "bootstrapResetEnrollmentLoginLogout": true,
+      "viewport360": true,
+      "readErrors": [401, 403, 409, 429, "network"],
+      "historyNavigation": true,
+      "errors": []
+    },
+    "platform": {
+      "passed": true,
+      "localSMTP": true,
+      "offlineSuspensionRecovery": true,
+      "twoOrganizationsTwoSuperAdmins": true,
+      "realPostgres": true,
+      "realBrowser": "153.0.4234.48",
+      "organizationInvitationActivationSuspensionReactivation": true,
+      "viewport360": true,
+      "viewportWidths": [360, 390, 768, 1280, 1440],
+      "cssZoom200": true,
+      "mobileKeyboardFocus": true,
+      "unsavedDraftProtection": true,
+      "invitationDirectory": true,
+      "errors": []
+    },
+    "offlineSuspension": {
+      "passed": true,
+      "base": "http://127.0.0.1:62201",
+      "count": 100,
+      "offlineSeconds": 4,
+      "requestedOfflineMinutes": 0,
+      "localFeedbackP95Ms": 43.02799999999934,
+      "mobileWidth": 390,
+      "unchangedPayloads": true,
+      "uniqueRemoteIds": 100,
+      "revokedUploadAttempts": 0,
+      "browser": "153.0.4234.48",
+      "javascriptErrors": []
+    }
+  },
+  "limitations": [
+    "Viewport e zoom CSS simulados; aparelhos físicos, Safari, leitor de tela e zoom nativo não homologados",
+    "SMTP local Mailpit; provedor externo não verificado",
+    "Imagens Docker da candidata UX ainda devem ser construídas pelo fluxo de deploy",
+    "Sem nova migration; ensaios anteriores de restauração/manutenção não repetidos nesta rodada",
+    "Nenhuma conta real criada; nenhuma publicação remota"
+  ]
+}

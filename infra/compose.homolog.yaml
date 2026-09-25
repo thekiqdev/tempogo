@@ -1,0 +1,77 @@
+# TempoGo: retain the existing project identity to reuse volumes and networks.
+name: cronocheckpoint-homolog
+services:
+  database:
+    image: postgres:18.6-bookworm
+    environment:
+      POSTGRES_USER: cronocheckpoint
+      POSTGRES_PASSWORD: ${HOMOLOG_DB_PASSWORD:?Configure .env.homolog}
+      POSTGRES_DB: cronocheckpoint_homolog
+    volumes:
+      - homolog-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cronocheckpoint -d cronocheckpoint_homolog"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  migrate:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
+      target: api
+    command: ["node","apps/api/dist/homolog-bootstrap.js"]
+    environment:
+      MIGRATION_DATABASE_URL: postgresql://cronocheckpoint:${HOMOLOG_DB_PASSWORD}@database:5432/cronocheckpoint_homolog
+      RUNTIME_PASSWORD: ${HOMOLOG_RUNTIME_PASSWORD:?Configure .env.homolog}
+      LOCAL_HOMOLOG: "true"
+      PLATFORM_RUNTIME_PASSWORD: ${HOMOLOG_PLATFORM_PASSWORD:?Configure .env.homolog}
+    depends_on:
+      database:
+        condition: service_healthy
+  api:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
+      target: api
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://cronocheckpoint_runtime:${HOMOLOG_RUNTIME_PASSWORD}@database:5432/cronocheckpoint_homolog
+      PLATFORM_DATABASE_URL: postgresql://cronocheckpoint_platform_runtime:${HOMOLOG_PLATFORM_PASSWORD}@database:5432/cronocheckpoint_homolog
+      PLATFORM_MFA_KEY: ${HOMOLOG_PLATFORM_MFA_KEY:?Configure .env.homolog}
+      API_HOST: 0.0.0.0
+      API_PORT: 3001
+      PUBLIC_ORIGIN: https://localhost:5443
+      SMTP_HOST: mailpit
+      SMTP_PORT: 1025
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      mailpit:
+        condition: service_started
+    healthcheck:
+      test: ["CMD","node","-e","fetch('http://127.0.0.1:3001/api/v1/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  web:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
+      target: web
+    ports:
+      - "127.0.0.1:5443:443"
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+  mailpit:
+    image: axllent/mailpit:v1.29
+    ports:
+      - "127.0.0.1:8026:8025"
+volumes:
+  homolog-data:
+  caddy-data:
+  caddy-config:
+

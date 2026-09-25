@@ -1,0 +1,62 @@
+{
+  "name": "tempogo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22.19.0 <23",
+    "npm": ">=10 <11"
+  },
+  "packageManager": "npm@10.9.3",
+  "scripts": {
+    "dev": "npm run build -w @tempogo/contracts && concurrently -k -n api,web \"npm run dev -w @tempogo/api\" \"npm run dev -w @tempogo/web\"",
+    "build": "npm run build -w @tempogo/contracts && npm run build -w @tempogo/api && npm run build -w @tempogo/web",
+    "typecheck": "npm run build -w @tempogo/contracts && npm run typecheck --workspaces --if-present",
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "test": "npm run build -w @tempogo/contracts && tsx --test tests/unit/*.test.ts",
+    "test:integration": "npm run build -w @tempogo/contracts && node --env-file=.env --import tsx --test tests/integration/*.test.ts",
+    "check": "npm run lint && npm run typecheck && npm test && npm run build",
+    "db:up": "docker compose -f infra/compose.yaml --env-file .env up -d --wait",
+    "db:stop": "docker compose -f infra/compose.yaml --env-file .env stop",
+    "db:migrate": "node --env-file=.env --import tsx apps/api/src/migrate-cli.ts",
+    "admin:create": "node --env-file=.env --import tsx apps/api/src/admin-cli.ts",
+    "db:runtime": "node --env-file=.env --import tsx apps/api/src/runtime-cli.ts",
+    "homolog:up": "docker compose -f infra/compose.homolog.yaml --env-file .env.homolog up -d --build --wait",
+    "homolog:stop": "docker compose -f infra/compose.homolog.yaml --env-file .env.homolog stop",
+    "test:e2e": "node tests/e2e/sprint-01.mjs",
+    "test:e2e:capture": "node tests/e2e/sprint-02.mjs",
+    "test:e2e:offline": "node tests/e2e/sprint-03.mjs",
+    "test:e2e:management": "node tests/e2e/sprint-04.mjs",
+    "test:load": "node --env-file=.env --import tsx tests/operations/load.mjs",
+    "test:pitr": "node tests/operations/pitr-drill.mjs",
+    "test:faults": "node --env-file=.env --import tsx tests/operations/faults.mjs",
+    "release:manifest": "node scripts/release.mjs",
+    "test:e2e:admin-mobile": "node tests/e2e/admin-mobile.mjs",
+    "platform:admin": "node --env-file=.env --import tsx apps/api/src/platform-cli.ts",
+    "platform:local": "node --env-file=.env scripts/platform-local.mjs",
+    "test:e2e:platform": "node --env-file=.env --import tsx tests/e2e/platform.mjs",
+    "test:e2e:platform-release": "node --env-file=.env --import tsx tests/e2e/platform-release.mjs",
+    "test:platform-upgrade": "node --env-file=.env --import tsx tests/operations/platform-upgrade.mjs",
+    "test:platform-maintenance": "node tests/operations/platform-maintenance.mjs",
+    "release:platform": "node scripts/release.mjs super-admin",
+    "release:platform-ux": "node scripts/release.mjs super-admin-ux",
+    "test:e2e:platform-ux": "node --env-file=.env --import tsx tests/e2e/platform-ux.mjs"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.14",
+    "@playwright/test": "1.63.0",
+    "@types/node": "22.20.3",
+    "@types/nodemailer": "8.0.2",
+    "@types/pg": "8.23.1",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "concurrently": "10.0.5",
+    "tsx": "4.23.13",
+    "typescript": "5.9.3"
+  }
+}

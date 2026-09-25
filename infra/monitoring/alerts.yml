@@ -1,0 +1,24 @@
+groups:
+  - name: tempogo
+    rules:
+      - alert: TempoGoApiUnavailable
+        expr: up{job="tempogo"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: API ou coleta de métricas indisponível; confira readiness e banco.
+      - alert: TempoGoIngestionErrors
+        expr: (sum(increase(tempogo_http_requests_total{route="/api/v1/field/sync",status=~"5.."}[5m])) / clamp_min(sum(increase(tempogo_http_requests_total{route="/api/v1/field/sync"}[5m])),1) > 0.01) and (sum(increase(tempogo_http_requests_total{route="/api/v1/field/sync"}[5m])) >= 100)
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Mais de 1% de falhas de ingestão com tráfego significativo.
+      - alert: TempoGoIngestionSlow
+        expr: histogram_quantile(0.95,sum by (le) (rate(tempogo_http_duration_ms_bucket{route="/api/v1/field/sync"}[5m]))) > 1000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Confirmação da API acima da meta de um segundo.
