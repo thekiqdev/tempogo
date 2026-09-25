@@ -45,7 +45,8 @@
     "test:platform-maintenance": "node tests/operations/platform-maintenance.mjs",
     "release:platform": "node scripts/release.mjs super-admin",
     "release:platform-ux": "node scripts/release.mjs super-admin-ux",
-    "test:e2e:platform-ux": "node --env-file=.env --import tsx tests/e2e/platform-ux.mjs"
+    "test:e2e:platform-ux": "node --env-file=.env --import tsx tests/e2e/platform-ux.mjs",
+    "migrate": "node --env-file-if-exists=.env apps/api/dist/migrate-cli.js"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",

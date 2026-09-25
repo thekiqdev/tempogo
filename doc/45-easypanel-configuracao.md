@@ -41,3 +41,19 @@ docker build -f infra/Dockerfile.web -t tempogo-web:deploy .
 ```
 
 Referência dos campos: [documentação oficial de App Service](https://easypanel.io/docs/services/app).
+
+## Aplicar o esquema completo do PostgreSQL
+
+Na imagem do backend atualizada, execute na pasta `/app`:
+
+```sh
+npm run migrate
+```
+
+Configure `MIGRATION_DATABASE_URL` com a conexão administrativa do banco no job temporário. Se ela não estiver definida, o comando usa `DATABASE_URL`, que precisa ter permissão para criar tabelas, funções e roles. A conexão limitada da API não é suficiente para instalar o esquema.
+
+O comando aplica todas as migrations SQL pendentes (atualmente 001–010), incluindo organizadores, eventos, checkpoints, passagens e plataforma/super admin. Mantém o histórico e valida os arquivos já aplicados. Repetir o comando não reaplica migrations concluídas. A execução usa transação e lock para evitar aplicação parcial ou concorrente.
+
+Este comando prepara o esquema em um banco PostgreSQL já criado. Não transfere dados de outro servidor nem cria contas iniciais. Após a instalação do esquema, provisionar os runtimes e o super admin conforme o guia 43. Retirar a conexão administrativa do serviço permanente.
+
+Em desenvolvimento, na raiz do repositório, execute `npm run build` antes de `npm run migrate`. O `.env` local é opcional; variáveis já presentes no ambiente têm prioridade. O comando existente `npm run db:migrate` continua disponível para executar diretamente o código TypeScript local.
