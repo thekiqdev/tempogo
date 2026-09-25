@@ -49,3 +49,7 @@ Abra `/api/v1/health/ready` pelo domínio do frontend para verificar a conexão 
 O setup preserva o arquivo gerado e as senhas; não troca credenciais de roles existentes. Se falhar, corrija a causa e repita no mesmo container, com o arquivo intacto. Se as roles já existem e o arquivo foi perdido, restaure-o do backup seguro ou use as credenciais previamente provisionadas; o instalador recusa redefini-las automaticamente. Para atualizações normais de esquema, use `npm run migrate` com credencial administrativa em job temporário.
 
 O arquivo tempogo-runtime.env não entra no Git ou no contexto Docker. O script não imprime credenciais nos logs. Não gere outra chave MFA depois de cadastrar usuários.
+
+## Inicialização automática pelo Environment do Easypanel
+
+Para usar somente as variáveis do Easypanel, sem arquivo de credenciais nem volume, prefira o [fluxo atualizado de inicialização e recuperação](47-recuperacao-instalacao.md). Ele substitui o comando temporário descrito acima pelo comando padrão da imagem.

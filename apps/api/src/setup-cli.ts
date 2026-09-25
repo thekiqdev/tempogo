@@ -4,10 +4,12 @@ import { resolve } from "node:path";
 import { parseEnv } from "node:util";
 import pg from "pg";
 import { migrate } from "./migrations.js";
+import { environmentRuntime } from "./runtime-environment.js";
 import { assertPlatformRole, assertRuntimeRole } from "./runtime-role.js";
 
 // Keep generated credentials before changing the database, so a failed run can resume.
-const output = resolve("tempogo-runtime.env");
+const environmentOnly = process.env.SETUP_ON_START === "true";
+const output = resolve(process.env.SETUP_STATE_DIR ?? ".", "tempogo-runtime.env");
 class SetupError extends Error {}
 let pool: pg.Pool | undefined;
 try {
@@ -38,15 +40,24 @@ try {
   console.log("Conexão PostgreSQL confirmada.");
   let values: Record<string, string | undefined>;
   try {
+    if (environmentOnly) throw Object.assign(new Error(), { code: "ENOENT" });
     values = parseEnv(await readFile(output, "utf8"));
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
     const existing = await pool.query(
       "SELECT rolname FROM pg_roles WHERE rolname IN ('cronocheckpoint_runtime','cronocheckpoint_platform_runtime')",
     );
-    if (existing.rowCount)
+    if (
+      existing.rowCount &&
+      !environmentOnly &&
+      process.env.SETUP_RESET_RUNTIME_PASSWORDS !== "true"
+    )
       throw new SetupError(
         "Acessos já existem. Preserve as senhas atuais: restaure tempogo-runtime.env para repetir o setup. Nenhuma senha foi alterada.",
+      );
+    if (existing.rowCount && !process.env.PLATFORM_MFA_KEY)
+      throw new SetupError(
+        "Recuperação exige PLATFORM_MFA_KEY existente. A chave de usuários MFA não pode ser regenerada.",
       );
     const key = process.env.PLATFORM_MFA_KEY ?? randomBytes(32).toString("hex");
     if (!/^[a-fA-F0-9]{64}$/.test(key))
@@ -72,17 +83,21 @@ try {
           ? process.env.METRICS_TOKEN
           : randomBytes(32).toString("hex"),
     };
+    if (environmentOnly) Object.assign(values, environmentRuntime(process.env));
     // Exclude administrative credentials. SMTP stays in the service's existing environment.
-    await writeFile(
-      output,
-      Object.entries(values)
-        .map(([k, v]) => `${k}=${v}`)
-        .join("\n") + "\n",
-      { flag: "wx", mode: 0o600 },
-    );
+    if (!environmentOnly)
+      await writeFile(
+        output,
+        Object.entries(values)
+          .map(([k, v]) => `${k}=${v}`)
+          .join("\n") + "\n",
+        { flag: "wx", mode: 0o600 },
+      );
   }
   if (!/^[a-fA-F0-9]{64}$/.test(values.PLATFORM_MFA_KEY ?? ""))
     throw new SetupError("Arquivo de configuração com chave MFA inválida.");
+  if (process.env.PLATFORM_MFA_KEY && process.env.PLATFORM_MFA_KEY !== values.PLATFORM_MFA_KEY)
+    throw new SetupError("PLATFORM_MFA_KEY difere da chave persistida. Preserve a chave original.");
   const roles = [
     ["DATABASE_URL", "cronocheckpoint_runtime", "cronocheckpoint_app"],
     ["PLATFORM_DATABASE_URL", "cronocheckpoint_platform_runtime", "cronocheckpoint_platform"],
@@ -107,6 +122,13 @@ try {
     await client.query("SELECT pg_advisory_xact_lock(74892002)");
     for (const [key, role, group] of roles) {
       const found = await client.query("SELECT 1 FROM pg_roles WHERE rolname=$1", [role]);
+      if (found.rowCount && process.env.SETUP_RESET_RUNTIME_PASSWORDS === "true") {
+        const statement = await client.query<{ sql: string }>(
+          "SELECT format('ALTER ROLE %I PASSWORD %L', $1::text, $2::text) sql",
+          [role, new URL(values[key]!).password],
+        );
+        await client.query(statement.rows[0]!.sql);
+      }
       if (!found.rowCount) {
         const password = new URL(values[key]!).password;
         const statement = await client.query<{ sql: string }>(
@@ -133,12 +155,11 @@ try {
     }
   }
   console.log("Instalação concluída e conexões da API verificadas.");
-  console.log(
-    `Configuração salva em ${output}. Copie seu conteúdo para Environment do backend e guarde uma cópia segura antes de recriar o container.`,
-  );
-  console.log(
-    "Preserve o SMTP existente. Remova MIGRATION_DATABASE_URL do serviço permanente e faça o deploy. Nenhum segredo foi impresso neste log.",
-  );
+  if (environmentOnly)
+    console.log(
+      "Configuração obtida das variáveis do Easypanel. Nenhum arquivo de credenciais é necessário.",
+    );
+  else console.log(`Configuração salva em ${output}. Guarde uma cópia segura.`);
 } catch (e) {
   const code = (e as NodeJS.ErrnoException).code;
   const known: Record<string, string> = {
