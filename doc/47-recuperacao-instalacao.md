@@ -35,3 +35,18 @@ O frontend usa API_UPSTREAM com o DNS privado real do backend, porta 3001. O dom
 ## Verificação local realizada
 
 Imagem Docker compilada. PostgreSQL temporário com 10 migrations e roles antigas; arquivo original descartado; recuperação explícita; readiness 200; container recriado sem volume e sem recuperação; readiness 200 novamente. Confirmado que o modo automático não criou tempogo-runtime.env. Nenhuma conexão com a VPS foi realizada.
+
+## Primeiro superadmin sem SMTP
+
+Após atualizar a imagem, configure temporariamente no Environment do backend:
+
+```env
+SUPERADMIN_EMAIL=seu-email@seu-dominio.com.br
+SUPERADMIN_PASSWORD=ESCOLHA_UMA_SENHA_DE_12_A_128_CARACTERES
+```
+
+No terminal, na pasta `/app`, execute `npm run superadmin:create`. Usa MIGRATION_DATABASE_URL ou DATABASE_URL administrativa já configurada no modo automático. Não envia email, não registra a senha em logs e salva somente o hash. Depois remova as duas variáveis temporárias do Easypanel e faça Deploy para removê-las do processo.
+
+Entre em `/plataforma` com o email e a senha escolhidos. Cadastre o autenticador MFA no primeiro acesso e guarde os códigos de recuperação. O email funciona como identificador de login; o comando não exige SMTP. As funções normais de convite e recuperação por email continuam dependendo de SMTP.
+
+O comando só permite o primeiro superadmin. Recusa bootstrap anterior e email de conta já existente, sem sobrescrever senhas ou conceder privilégios a uma identidade existente.

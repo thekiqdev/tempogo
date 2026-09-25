@@ -47,7 +47,8 @@
     "release:platform-ux": "node scripts/release.mjs super-admin-ux",
     "test:e2e:platform-ux": "node --env-file=.env --import tsx tests/e2e/platform-ux.mjs",
     "migrate": "node --env-file-if-exists=.env apps/api/dist/migrate-cli.js",
-    "setup": "cd apps/api && npm run setup"
+    "setup": "cd apps/api && npm run setup",
+    "superadmin:create": "node --env-file-if-exists=.env apps/api/dist/bootstrap-password-cli.js"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",

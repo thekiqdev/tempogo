@@ -1,7 +1,7 @@
 import type pg from "pg";
 import { transaction } from "./db.js";
 import { platformAudit } from "./platform.js";
-import { digest, token } from "./security.js";
+import { digest, hashPassword, token } from "./security.js";
 export async function bootstrapPlatform(pool: pg.Pool, email: string) {
   const raw = token();
   await transaction(pool, async (c) => {
@@ -68,4 +68,45 @@ export async function emergencyMfaReset(pool: pg.Pool, email: string, reason: st
     await platformAudit(c, null, u.id, "emergency_recovery.requested", undefined, reason);
   });
   return raw;
+}
+
+export async function bootstrapPlatformWithPassword(
+  pool: pg.Pool,
+  email: string,
+  password: string,
+) {
+  const hash = await hashPassword(password);
+  await transaction(pool, async (c) => {
+    await c.query("SELECT pg_advisory_xact_lock(730207)");
+    if (
+      (
+        await c.query(
+          "SELECT 1 FROM app.platform_bootstrap UNION ALL SELECT 1 FROM app.platform_privileges LIMIT 1",
+        )
+      ).rowCount
+    )
+      throw new Error("Bootstrap já realizado. Este comando não redefine contas existentes.");
+    if ((await c.query("SELECT 1 FROM app.users WHERE email=$1", [email])).rowCount)
+      throw new Error(
+        "Email já pertence a uma conta. Use um email novo para o primeiro superadmin.",
+      );
+    const user = (
+      await c.query("INSERT INTO app.users(email,password_hash) VALUES($1,$2) RETURNING id", [
+        email,
+        hash,
+      ])
+    ).rows[0];
+    await c.query("INSERT INTO app.platform_privileges(user_id,state) VALUES($1,'invited')", [
+      user.id,
+    ]);
+    await c.query("INSERT INTO app.platform_bootstrap(user_id) VALUES($1)", [user.id]);
+    await platformAudit(
+      c,
+      null,
+      user.id,
+      "bootstrap.executed",
+      undefined,
+      "Provisionamento inicial com senha por comando técnico, sem SMTP",
+    );
+  });
 }
