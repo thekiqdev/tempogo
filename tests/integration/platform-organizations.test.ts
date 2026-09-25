@@ -77,31 +77,50 @@ test("SA03: organizações, convites, outbox, isolamento e suspensão", async (t
   const ownerEmail = "owner@sa03.test",
     password = "SA03-owner-password-123";
   try {
-    await t.test("reautenticação, idempotência e cadastro pendente atômico", async () => {
-      const body = {
-        name: "Corrida SA03",
-        contact_email: ownerEmail,
-        responsible_email: ownerEmail,
-      };
-      assert.equal((await call("/organizations", body, randomUUID(), "POST", "")).statusCode, 401);
-      await db.query("UPDATE app.platform_sessions SET reauthenticated_until=NULL");
-      assert.equal((await call("/organizations", body)).statusCode, 403);
-      await db.query(
-        "UPDATE app.platform_sessions SET reauthenticated_until=now()+interval '5 minutes'",
-      );
-      const key = randomUUID();
-      const r = await call("/organizations", body, key);
-      assert.equal(r.statusCode, 201, r.body);
-      org = r.json().organization;
-      invite = r.json().invitation;
-      assert.equal(org.status, "pending");
-      assert.equal((await call("/organizations", body, key)).json().organization.id, org.id);
-      assert.equal(
-        (await call("/organizations", { ...body, name: "Different" }, key)).statusCode,
-        409,
-      );
-      assert.equal((await db.query("SELECT count(*)::int n FROM app.organizations")).rows[0].n, 1);
-    });
+    await t.test(
+      "criação com sessão autenticada, idempotência e cadastro pendente atômico",
+      async () => {
+        const body = {
+          name: "Corrida SA03",
+          contact_email: ownerEmail,
+          responsible_email: ownerEmail,
+        };
+        assert.equal(
+          (await call("/organizations", body, randomUUID(), "POST", "")).statusCode,
+          401,
+        );
+        await db.query("UPDATE app.platform_sessions SET reauthenticated_until=NULL");
+        const key = randomUUID();
+        const r = await call("/organizations", body, key);
+        assert.equal(r.statusCode, 201, r.body);
+        org = r.json().organization;
+        assert.equal(
+          (
+            await call(
+              "/organizations/" + org.id,
+              { name: "Alteração bloqueada", contact_email: ownerEmail, version: org.version },
+              randomUUID(),
+              "PATCH",
+            )
+          ).statusCode,
+          403,
+        );
+        await db.query(
+          "UPDATE app.platform_sessions SET reauthenticated_until=now()+interval '5 minutes'",
+        );
+        invite = r.json().invitation;
+        assert.equal(org.status, "pending");
+        assert.equal((await call("/organizations", body, key)).json().organization.id, org.id);
+        assert.equal(
+          (await call("/organizations", { ...body, name: "Different" }, key)).statusCode,
+          409,
+        );
+        assert.equal(
+          (await db.query("SELECT count(*)::int n FROM app.organizations")).rows[0].n,
+          1,
+        );
+      },
+    );
     await t.test("falha SMTP preserva convite, reenvio invalida token anterior", async () => {
       smtpFails = true;
       await deliverInvitations(options);

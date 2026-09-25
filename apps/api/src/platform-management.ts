@@ -57,7 +57,10 @@ export function managementService(o: PlatformOptions, guard: PlatformGuard) {
       for (const id of [...new Set(organizations)].sort()) await lockOrganization(c, id);
       const s = await guard(req, c, true);
       authorizedActor = s.u.user_id;
-      if (!s.reauthenticated_until || new Date(s.reauthenticated_until).getTime() < Date.now())
+      if (
+        operation !== "organization.create" &&
+        (!s.reauthenticated_until || new Date(s.reauthenticated_until).getTime() < Date.now())
+      )
         throw failure("REAUTH_REQUIRED", "Confirme sua identidade antes de continuar.", 403);
       const hash = digest(JSON.stringify(body)),
         old = (

@@ -260,8 +260,8 @@ export function Organizations({ csrf, routeId = "" }: { csrf: string; routeId?: 
       {confirmation.element}
 
       <p>
-        Confirme sua identidade antes de criar ou alterar cadastros. A confirmação vale cinco
-        minutos.
+        Sua sessão permite criar organizações. Para alterar cadastros existentes, confirme sua
+        identidade. A confirmação vale cinco minutos.
       </p>
       {error && (
         <p role="alert" className="error">
