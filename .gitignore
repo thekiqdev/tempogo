@@ -10,3 +10,6 @@ tmp/
 .DS_Store
 
 !.env.homolog.example
+
+# Generated private installation configuration
+tempogo-runtime.env

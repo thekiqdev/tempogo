@@ -48,3 +48,5 @@ O banco de testes é separado do de desenvolvimento. O teste de integração nã
 ## Publicar no Easypanel
 
 Consulte [configuração por serviço](doc/45-easypanel-configuracao.md). Exemplos: [backend](apps/api/.env.example) e [frontend](apps/web/.env.example). Dockerfiles: infra/Dockerfile.api e infra/Dockerfile.web, ambos com contexto na raiz.
+
+Para uma primeira instalação com PostgreSQL já criado, use o [instalador simplificado](doc/46-instalacao-simplificada.md): npm run setup.
