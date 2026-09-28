@@ -41,7 +41,7 @@ export function authService(options: AuthOptions) {
       `UPDATE app.sessions s SET last_seen_at=now()
    FROM app.users u,app.organizations o,app.memberships m
    WHERE s.token_hash=$1 AND s.user_id=u.id AND s.organization_id=o.id
-   AND m.user_id=u.id AND m.organization_id=o.id AND m.active AND u.active AND o.active
+   AND m.user_id=u.id AND m.organization_id=o.id AND m.active AND u.active AND o.active AND NOT u.must_change_password
    AND s.revoked_at IS NULL AND s.expires_at>now() AND s.last_seen_at>now()-interval '30 minutes'
    RETURNING s.user_id,s.organization_id,s.token_hash,u.email,o.name AS organization_name`,
       [digest(raw)],
@@ -102,17 +102,67 @@ export function authService(options: AuthOptions) {
       if (!["GET", "HEAD", "OPTIONS"].includes(req.method) && req.headers.origin !== options.origin)
         throw new HttpError(403, "ORIGIN_INVALID", "Origem não permitida");
     });
+    app.post("/api/v1/auth/password/change-initial", async (req) => {
+      const input = z
+        .object({
+          email: emailSchema,
+          password: z.string().min(1).max(128),
+          new_password: passwordSchema,
+        })
+        .strict()
+        .parse(req.body);
+      await limit("login:" + req.ip + ":" + input.email, 5);
+      if (input.password === input.new_password)
+        throw new HttpError(
+          422,
+          "PASSWORD_REUSED",
+          "Escolha uma senha diferente da senha temporária.",
+        );
+      await transaction(pool, async (c) => {
+        const u = (
+          await c.query(
+            "SELECT id,password_hash,must_change_password FROM app.users WHERE email=$1 AND active FOR UPDATE",
+            [input.email],
+          )
+        ).rows[0];
+        if (
+          !u ||
+          !u.must_change_password ||
+          !(await verifyPassword(input.password, u.password_hash))
+        )
+          throw new HttpError(401, "INVALID_CREDENTIALS", "Email ou senha temporária inválidos.");
+        await c.query(
+          "UPDATE app.users SET password_hash=$2,must_change_password=false,version=version+1 WHERE id=$1",
+          [u.id, await hashPassword(input.new_password)],
+        );
+        await c.query(
+          "UPDATE app.sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL",
+          [u.id],
+        );
+        await c.query(
+          "UPDATE app.password_tokens SET used_at=now() WHERE user_id=$1 AND used_at IS NULL",
+          [u.id],
+        );
+        await platformAudit(c, null, u.id, "password.initial_changed", req.id);
+      });
+      return { message: "Senha atualizada. Entre com sua nova senha." };
+    });
     app.post("/api/v1/auth/admin/login", async (req, reply) => {
       const input = loginSchema.parse(req.body);
       await limit("login:" + req.ip + ":" + input.email, 5);
       const row = (
-        await pool.query<{ id: string; password_hash: string | null }>(
-          "SELECT id,password_hash FROM app.users WHERE email=$1 AND active",
+        await pool.query<{
+          id: string;
+          password_hash: string | null;
+          must_change_password: boolean;
+        }>(
+          "SELECT id,password_hash,must_change_password FROM app.users WHERE email=$1 AND active",
           [input.email],
         )
       ).rows[0];
       if (!(await verifyPassword(input.password, row?.password_hash ?? null)) || !row)
         throw new HttpError(401, "INVALID_CREDENTIALS", "Email ou senha inválidos");
+      if (row.must_change_password) return { password_change_required: true };
       const raw = token();
       const orgs = await pool.query<{ id: string; name: string }>(
         "SELECT o.id,o.name FROM app.organizations o JOIN app.memberships m ON m.organization_id=o.id WHERE m.user_id=$1 AND m.active AND o.active ORDER BY o.name",
@@ -215,10 +265,10 @@ export function authService(options: AuthOptions) {
           [digest(input.token)],
         );
         if (!valid.rowCount) throw new HttpError(400, "INVALID_TOKEN", "Link inválido ou expirado");
-        await c.query("UPDATE app.users SET password_hash=$1 WHERE id=$2 AND active", [
-          hash,
-          candidate.user_id,
-        ]);
+        await c.query(
+          "UPDATE app.users SET password_hash=$1,must_change_password=false WHERE id=$2 AND active",
+          [hash, candidate.user_id],
+        );
         await c.query(
           "UPDATE app.sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL",
           [candidate.user_id],

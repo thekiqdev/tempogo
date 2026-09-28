@@ -1,6 +1,7 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { useActionConfirmation } from "./platform-dialog";
 import { EntityFilter } from "./platform-filter";
+import { SuperadminCreate } from "./superadmin-create";
 
 type User = {
   id: string;
@@ -45,6 +46,7 @@ export function Accounts({
   routeId?: string;
 }) {
   const confirmation = useActionConfirmation();
+  const [creating, setCreating] = useState(false);
   const [membershipCursor, setMembershipCursor] = useState<string | null>(null),
     [organizationFilter, setOrganizationFilter] = useState(
       new URLSearchParams(location.search).get("organization_id") ?? "",
@@ -73,7 +75,6 @@ export function Accounts({
     [memberships, setMemberships] = useState<Membership[]>([]),
     [invites, setInvites] = useState<Invite[]>([]),
     [inviteCursor, setInviteCursor] = useState<string | null>(null),
-    [recipient, setRecipient] = useState(""),
     [newEmail, setNewEmail] = useState(""),
     [scope, setScope] = useState("all"),
     [org, setOrg] = useState(""),
@@ -112,7 +113,7 @@ export function Accounts({
     const decision = await confirmation.confirm(
       (labels[path.split("/").at(-1)!] ?? "Confirmar convite") +
         " — " +
-        (selected?.email ?? recipient),
+        (selected?.email ?? "conta selecionada"),
       "reason" in data,
     );
     if (decision === null) throw new Error("Ação cancelada. Nenhuma alteração enviada.");
@@ -242,6 +243,24 @@ export function Accounts({
         </p>
       )}
       {notice && <p role="status">{notice}</p>}
+      {creating && (
+        <SuperadminCreate
+          csrf={csrf}
+          onClose={() => setCreating(false)}
+          onCreated={(id) => {
+            setCreating(false);
+            setNotice(
+              "Superadmin cadastrado. O titular já pode entrar com email e senha e configurar o MFA.",
+            );
+            open(id);
+          }}
+        />
+      )}
+      {onlySuper && !routeId && (
+        <button className="primary" onClick={() => setCreating(true)}>
+          Novo superadmin
+        </button>
+      )}
       {!routeId && (
         <>
           <form
@@ -323,127 +342,131 @@ export function Accounts({
             Se esta pessoa for responsável, transfira a responsabilidade na seção Organizações antes
             de bloquear. O último administrador não pode ser removido.
           </p>
-          <h4>Vínculos organizacionais</h4>
-          <ul>
-            {memberships.map((m) => (
-              <li key={m.organization_id}>
-                {m.name} · {m.active ? "Ativo" : "Bloqueado"}
-                {m.responsible && " · Responsável"}
-                <button
-                  disabled={!allowed || m.status === "closed"}
-                  onClick={() =>
-                    void run(async () => {
-                      await write(
-                        "/organizations/" +
-                          m.organization_id +
-                          "/members/" +
-                          selected.id +
-                          "/status",
-                        { version: m.version, active: !m.active, reason: "" },
-                      );
-                      await detail(selected.id);
-                      setNotice("Vínculo atualizado.");
-                    })
-                  }
-                >
-                  {m.active ? "Bloquear vínculo" : "Reativar vínculo"}
-                </button>
-              </li>
-            ))}
-          </ul>
-          {membershipCursor && (
+          <details>
+            <summary>Organizações vinculadas</summary>
+            <ul>
+              {memberships.map((m) => (
+                <li key={m.organization_id}>
+                  {m.name} · {m.active ? "Ativo" : "Bloqueado"}
+                  {m.responsible && " · Responsável"}
+                  <button
+                    disabled={!allowed || m.status === "closed"}
+                    onClick={() =>
+                      void run(async () => {
+                        await write(
+                          "/organizations/" +
+                            m.organization_id +
+                            "/members/" +
+                            selected.id +
+                            "/status",
+                          { version: m.version, active: !m.active, reason: "" },
+                        );
+                        await detail(selected.id);
+                        setNotice("Vínculo atualizado.");
+                      })
+                    }
+                  >
+                    {m.active ? "Bloquear vínculo" : "Reativar vínculo"}
+                  </button>
+                </li>
+              ))}
+            </ul>
+            {membershipCursor && (
+              <button
+                disabled={busy}
+                onClick={() =>
+                  void run(async () => {
+                    const r = await api<{ items: Membership[]; next_cursor: string | null }>(
+                      "/users/" + selected.id + "/memberships?cursor=" + membershipCursor,
+                      csrf,
+                    );
+                    setMemberships((v) => [...v, ...r.items]);
+                    setMembershipCursor(r.next_cursor);
+                  })
+                }
+              >
+                Mais vínculos
+              </button>
+            )}
+          </details>
+          <details>
+            <summary>Sessões e recuperação de acesso</summary>
+            <label>
+              Alcance da revogação
+              <select value={scope} onChange={(e) => setScope(e.target.value)}>
+                <option value="all">Todas as sessões</option>
+                <option value="platform">Somente plataforma</option>
+                <option value="organization">Uma organização</option>
+              </select>
+            </label>
+            {scope === "organization" && (
+              <label>
+                Organização da revogação
+                <select value={org} onChange={(e) => setOrg(e.target.value)}>
+                  {memberships.map((m) => (
+                    <option key={m.organization_id} value={m.organization_id}>
+                      {m.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             <button
-              disabled={busy}
+              disabled={!allowed || (scope === "organization" && !org)}
               onClick={() =>
                 void run(async () => {
-                  const r = await api<{ items: Membership[]; next_cursor: string | null }>(
-                    "/users/" + selected.id + "/memberships?cursor=" + membershipCursor,
-                    csrf,
-                  );
-                  setMemberships((v) => [...v, ...r.items]);
-                  setMembershipCursor(r.next_cursor);
+                  await write("/users/" + selected.id + "/sessions/revoke", {
+                    scope,
+                    ...(scope === "organization" ? { organization_id: org } : {}),
+                    reason: "",
+                  });
+                  setNotice("Sessões revogadas.");
                 })
               }
             >
-              Mais vínculos
+              Revogar sessões
             </button>
-          )}
-          <h4>Segurança da conta</h4>
-          <label>
-            Alcance da revogação
-            <select value={scope} onChange={(e) => setScope(e.target.value)}>
-              <option value="all">Todas as sessões</option>
-              <option value="platform">Somente plataforma</option>
-              <option value="organization">Uma organização</option>
-            </select>
-          </label>
-          {scope === "organization" && (
-            <label>
-              Organização da revogação
-              <select value={org} onChange={(e) => setOrg(e.target.value)}>
-                {memberships.map((m) => (
-                  <option key={m.organization_id} value={m.organization_id}>
-                    {m.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
-          <button
-            disabled={!allowed || (scope === "organization" && !org)}
-            onClick={() =>
-              void run(async () => {
-                await write("/users/" + selected.id + "/sessions/revoke", {
-                  scope,
-                  ...(scope === "organization" ? { organization_id: org } : {}),
-                  reason: "",
-                });
-                setNotice("Sessões revogadas.");
-              })
-            }
-          >
-            Revogar sessões
-          </button>
-          <button
-            disabled={!allowed || !selected.active}
-            onClick={() =>
-              void run(async () => {
-                await write("/users/" + selected.id + "/password-reset", { reason: "" });
-                setNotice("Recuperação de senha na fila de email.");
-              })
-            }
-          >
-            Enviar redefinição de senha
-          </button>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              void run(async () => {
-                await write("/users/" + selected.id + "/email-change", {
-                  version: selected.version,
-                  new_email: newEmail,
-                  reason: "",
-                });
-                setNotice(
-                  "Confirmação enviada para o novo email. O acesso atual permanece até o aceite.",
-                );
-              });
-            }}
-          >
-            <label>
-              Novo email de acesso
-              <input
-                type="email"
-                required
-                data-draft="true"
-                value={newEmail}
-                onChange={(e) => setNewEmail(e.target.value)}
-              />
-            </label>
-            <button disabled={!allowed || !selected.active || newEmail === selected.email}>
-              Solicitar alteração de email
+            <button
+              disabled={!allowed || !selected.active}
+              onClick={() =>
+                void run(async () => {
+                  await write("/users/" + selected.id + "/password-reset", { reason: "" });
+                  setNotice("Recuperação de senha na fila de email.");
+                })
+              }
+            >
+              Enviar redefinição de senha
             </button>
-          </form>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                void run(async () => {
+                  await write("/users/" + selected.id + "/email-change", {
+                    version: selected.version,
+                    new_email: newEmail,
+                    reason: "",
+                  });
+                  setNotice(
+                    "Confirmação enviada para o novo email. O acesso atual permanece até o aceite.",
+                  );
+                });
+              }}
+            >
+              <label>
+                Novo email de acesso
+                <input
+                  type="email"
+                  required
+                  data-draft="true"
+                  value={newEmail}
+                  onChange={(e) => setNewEmail(e.target.value)}
+                />
+              </label>
+              <button disabled={!allowed || !selected.active || newEmail === selected.email}>
+                Solicitar alteração de email
+              </button>
+            </form>
+          </details>
           {["active", "invited"].includes(selected.platform_state) && (
             <>
               <button
@@ -481,74 +504,53 @@ export function Accounts({
       )}
       {onlySuper && !routeId && (
         <>
-          <h3>Convidar super admin</h3>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              void run(async () => {
-                await write("/super-admin-invitations", { email: recipient });
-                setRecipient("");
-                await listInvites();
-                setNotice("Convite global na fila. O acesso depende do aceite e do MFA.");
-              });
-            }}
-          >
-            <label>
-              Email do novo super admin
-              <input
-                type="email"
-                required
-                data-draft="true"
-                value={recipient}
-                onChange={(e) => setRecipient(e.target.value)}
-              />
-            </label>
-            <button disabled={busy}>Convidar super admin</button>
-          </form>
-          <ul>
-            {invites.map((i) => (
-              <li key={i.id}>
-                {i.email} · {i.status}
-                {["pending", "expired"].includes(i.status) && (
-                  <>
-                    <button
-                      disabled={!allowed}
-                      onClick={() =>
-                        void run(async () => {
-                          await write("/super-admin-invitations/" + i.id + "/resend", {
-                            version: i.version,
-                            reason: "",
-                          });
-                          await listInvites();
-                        })
-                      }
-                    >
-                      Reenviar convite global
-                    </button>
-                    <button
-                      disabled={!allowed}
-                      onClick={() =>
-                        void run(async () => {
-                          await write("/super-admin-invitations/" + i.id + "/cancel", {
-                            version: i.version,
-                            reason: "",
-                          });
-                          await listInvites();
-                        })
-                      }
-                    >
-                      Cancelar convite global
-                    </button>
-                  </>
-                )}
-              </li>
-            ))}
-          </ul>
-          {inviteCursor && (
-            <button disabled={busy} onClick={() => void run(() => listInvites(inviteCursor))}>
-              Mais convites globais
-            </button>
-          )}
+          <details>
+            <summary>Convites anteriores</summary>
+            <ul>
+              {invites.map((i) => (
+                <li key={i.id}>
+                  {i.email} · {i.status}
+                  {["pending", "expired"].includes(i.status) && (
+                    <>
+                      <button
+                        disabled={!allowed}
+                        onClick={() =>
+                          void run(async () => {
+                            await write("/super-admin-invitations/" + i.id + "/resend", {
+                              version: i.version,
+                              reason: "",
+                            });
+                            await listInvites();
+                          })
+                        }
+                      >
+                        Reenviar convite global
+                      </button>
+                      <button
+                        disabled={!allowed}
+                        onClick={() =>
+                          void run(async () => {
+                            await write("/super-admin-invitations/" + i.id + "/cancel", {
+                              version: i.version,
+                              reason: "",
+                            });
+                            await listInvites();
+                          })
+                        }
+                      >
+                        Cancelar convite global
+                      </button>
+                    </>
+                  )}
+                </li>
+              ))}
+            </ul>
+            {inviteCursor && (
+              <button disabled={busy} onClick={() => void run(() => listInvites(inviteCursor))}>
+                Mais convites globais
+              </button>
+            )}
+          </details>
         </>
       )}
     </section>

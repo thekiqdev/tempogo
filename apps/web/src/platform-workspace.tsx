@@ -9,7 +9,6 @@ import { AuditPanel, OverviewPanel } from "./platform-overview";
 const links = [
   ["", "Visão geral", "◫"],
   ["organizacoes", "Organizações", "▦"],
-  ["pessoas", "Pessoas", "♧"],
   ["super-admins", "Super admins", "◇"],
   ["convites", "Convites", "✉"],
   ["auditoria", "Auditoria", "≡"],
@@ -28,12 +27,47 @@ export function PlatformWorkspace({
   onLogout: () => void;
 }) {
   const [path, setPath] = useState(location.pathname),
-    [menu, setMenu] = useState(false);
+    [menu, setMenu] = useState(false),
+    [collapsed, setCollapsed] = useState(() => {
+      try {
+        return localStorage.getItem("tempogo:sidebar-collapsed") === "true";
+      } catch {
+        return false;
+      }
+    });
   const menuButton = useRef<HTMLButtonElement>(null),
     dirty = useRef(false),
     returnMenuFocus = useRef(false),
     previousUrl = useRef(location.pathname + location.search);
   const confirmation = useActionConfirmation();
+  useEffect(() => {
+    try {
+      localStorage.setItem("tempogo:sidebar-collapsed", String(collapsed));
+    } catch {
+      /* Navigation works without storage. */
+    }
+  }, [collapsed]);
+  useEffect(() => {
+    const media = matchMedia("(min-width: 851px)");
+    const resize = () => {
+      if (media.matches) setMenu(false);
+    };
+    media.addEventListener("change", resize);
+    return () => media.removeEventListener("change", resize);
+  }, []);
+  useEffect(() => {
+    if (!menu) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, [menu]);
+  function closeMenu() {
+    returnMenuFocus.current = true;
+    setMenu(false);
+  }
+
   useEffect(() => {
     const saved = () => {
       dirty.current = false;
@@ -88,7 +122,7 @@ export function PlatformWorkspace({
   }
   return (
     <div
-      className="platform-workspace"
+      className={"platform-workspace" + (collapsed ? " is-collapsed" : "")}
       onChangeCapture={(e) => {
         if ((e.target as HTMLElement).closest("[data-draft]")) dirty.current = true;
       }}
@@ -97,7 +131,16 @@ export function PlatformWorkspace({
       <a className="platform-skip" href="#platform-content">
         Ir para o conteúdo
       </a>
+      {menu && (
+        <button
+          className="crm-menu-backdrop"
+          tabIndex={-1}
+          aria-label="Fechar navegação"
+          onClick={closeMenu}
+        />
+      )}
       <aside
+        id="platform-navigation"
         className={"crm-sidebar " + (menu ? "is-open" : "")}
         aria-label="Navegação da plataforma"
         onKeyDown={(e) => {
@@ -123,19 +166,28 @@ export function PlatformWorkspace({
       >
         <a
           className="crm-brand"
+          aria-label="TempoGo — visão geral"
           href="/plataforma"
           onClick={(e) => {
             e.preventDefault();
             navigate("");
           }}
         >
-          Tempo<span>Go</span>
+          <span className="crm-brand-full">
+            Tempo<span>Go</span>
+          </span>
+          <span className="crm-brand-short" aria-hidden="true">
+            T<span>G</span>
+          </span>
         </a>
-        <p className="crm-eyebrow">ADMINISTRAÇÃO</p>
+        <p className="crm-eyebrow">ESPAÇO DE GESTÃO</p>
         <nav>
           {links.map(([value, label]) => (
             <a
               key={value}
+              aria-label={label}
+              title={collapsed ? label : undefined}
+              className={value === "convites" ? "crm-nav-secondary" : undefined}
               href={"/plataforma" + (value ? "/" + value : "")}
               aria-current={section === value ? "page" : undefined}
               onClick={(e) => {
@@ -145,13 +197,15 @@ export function PlatformWorkspace({
               }}
             >
               <PlatformIcon name={value} />
-              {label}
+              <span className="crm-nav-label">{label}</span>
             </a>
           ))}
         </nav>
         <div className="crm-sidebar-bottom">
-          <span>Ambiente da plataforma</span>
-          <p>Organizações e acessos</p>
+          <div className="crm-environment">
+            <span className="crm-environment-dot" aria-hidden="true" />
+            <span className="crm-footer-label">TempoGo · Plataforma</span>
+          </div>
           <button
             className="crm-mobile-close"
             onClick={() => {
@@ -169,13 +223,32 @@ export function PlatformWorkspace({
             ref={menuButton}
             className="crm-menu-button"
             aria-expanded={menu}
+            aria-controls="platform-navigation"
             onClick={() => setMenu(!menu)}
           >
             Menu
           </button>
-          <span>Painel do super admin</span>
+          <button
+            className="crm-collapse-button"
+            aria-controls="platform-navigation"
+            aria-expanded={!collapsed}
+            aria-label={collapsed ? "Expandir painel lateral" : "Recolher painel lateral"}
+            title={collapsed ? "Expandir painel lateral" : "Recolher painel lateral"}
+            onClick={() => setCollapsed(!collapsed)}
+          >
+            <PlatformIcon name="sidebar" />
+          </button>
+          <span className="crm-topbar-context">
+            Administração <span>/ {current?.[1] ?? "Plataforma"}</span>
+          </span>
           <details className="crm-account">
-            <summary>{user}</summary>
+            <summary aria-label={"Conta: " + user}>
+              <span className="crm-avatar" aria-hidden="true">
+                {user.slice(0, 1).toUpperCase()}
+              </span>
+              <span className="crm-account-name">{user}</span>
+              <span aria-hidden="true">⌄</span>
+            </summary>
             <div>
               <p>Autenticação em duas etapas ativa</p>
               <button
@@ -196,19 +269,26 @@ export function PlatformWorkspace({
               {notice}
             </p>
           )}
-          <p className="crm-breadcrumb">Plataforma / {current?.[1] ?? "Página não encontrada"}</p>
-          <h1>{current?.[1] ?? "Página não encontrada"}</h1>
+          <h1 className="platform-sr-only">{current?.[1] ?? "Página não encontrada"}</h1>
+          {path.split("/")[3] && (
+            <p className="crm-breadcrumb">Plataforma / {current?.[1] ?? "Página não encontrada"}</p>
+          )}
           {section === "" ? (
             <OverviewPanel />
           ) : section === "organizacoes" ? (
             <Organizations csrf={csrf} routeId={path.split("/")[3] ?? ""} />
-          ) : section === "pessoas" || section === "super-admins" ? (
+          ) : section === "super-admins" ? (
             <Accounts
               key={section}
               csrf={csrf}
               onlySuper={section === "super-admins"}
               routeId={path.split("/")[3] ?? ""}
             />
+          ) : section === "pessoas" ? (
+            <p>
+              Os acessos agora são gerenciados dentro da organização.{" "}
+              <a href="/plataforma/organizacoes">Selecionar organização</a>
+            </p>
           ) : section === "convites" ? (
             <InvitationDirectory csrf={csrf} />
           ) : section === "auditoria" ? (

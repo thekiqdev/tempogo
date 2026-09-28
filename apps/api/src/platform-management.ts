@@ -1,8 +1,9 @@
-import { randomUUID } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import type pg from "pg";
 import { z } from "zod";
 import { HttpError, transaction } from "./db.js";
+import { registerOrganizationMembers } from "./organization-members.js";
 import type { PlatformOptions } from "./platform.js";
 import { platformCipher } from "./platform-crypto.js";
 import { digest, hashPassword, token, verifyPassword } from "./security.js";
@@ -57,12 +58,16 @@ export function managementService(o: PlatformOptions, guard: PlatformGuard) {
       for (const id of [...new Set(organizations)].sort()) await lockOrganization(c, id);
       const s = await guard(req, c, true);
       authorizedActor = s.u.user_id;
+      // A single organization uses the authenticated platform session; global writes retain step-up.
       if (
-        operation !== "organization.create" &&
+        typeof org !== "string" &&
         (!s.reauthenticated_until || new Date(s.reauthenticated_until).getTime() < Date.now())
       )
         throw failure("REAUTH_REQUIRED", "Confirme sua identidade antes de continuar.", 403);
-      const hash = digest(JSON.stringify(body)),
+      const hash =
+          operation.startsWith("organization.member.") || operation === "platform.create"
+            ? createHmac("sha256", o.key).update(JSON.stringify(body)).digest("hex")
+            : digest(JSON.stringify(body)),
         old = (
           await c.query(
             "SELECT * FROM app.platform_commands WHERE actor_id=$1 AND command_id=$2 AND created_at>now()-interval '24 hours'",
@@ -95,7 +100,10 @@ export function managementService(o: PlatformOptions, guard: PlatformGuard) {
               "management.denied",
               authorizedActor!,
               req.id,
-              { operation, code: error instanceof HttpError ? error.code : "INTERNAL_ERROR" },
+              {
+                operation,
+                code: error instanceof HttpError ? error.code : "INTERNAL_ERROR",
+              },
             ),
           );
         } catch {
@@ -154,6 +162,7 @@ export function registerOrganizations(
   o: PlatformOptions,
   guard: PlatformGuard,
 ) {
+  registerOrganizationMembers(app, o, guard);
   const service = managementService(o, guard),
     base = "/api/v1/platform";
   const getId = (req: FastifyRequest) => z.object({ id: uuid }).parse(req.params).id;
@@ -195,7 +204,7 @@ export function registerOrganizations(
     notes: z.string().max(2000).default(""),
   });
   app.post(base + "/organizations", async (req, reply) => {
-    const input = fields.extend({ responsible_email: email }).strict().parse(req.body);
+    const input = fields.extend({ responsible_email: email.optional() }).strict().parse(req.body);
     const id = randomUUID();
     const result = await service.write(req, "organization.create", input, id, async (c, actor) => {
       const organization = (
@@ -205,7 +214,9 @@ export function registerOrganizations(
           [id, input.name, input.contact_email, input.contact_phone, input.notes],
         )
       ).rows[0];
-      const invitation = await service.invitation(c, id, input.responsible_email, true);
+      const invitation = input.responsible_email
+        ? await service.invitation(c, id, input.responsible_email, true)
+        : null;
       await managementAudit(c, actor, id, "organization.created", id, req.id, { name: input.name });
       return { organization, invitation };
     });
@@ -272,7 +283,7 @@ export function registerOrganizations(
     return service.write(req, "organization.transition:" + id, input, id, async (c, actor) => {
       const old = await service.organization(c, id, input.version);
       const allowed: Record<string, string[]> = {
-        pending: ["closed"],
+        pending: ["active", "closed"],
         active: ["suspended", "closed"],
         suspended: ["active", "closed"],
         closed: [],
@@ -301,6 +312,16 @@ export function registerOrganizations(
         ).rowCount
       )
         throw failure("RESPONSIBLE_REQUIRED", "Selecione um responsável ativo antes de reativar.");
+      if (old.status === "pending" && input.to === "active") {
+        await c.query(
+          "UPDATE app.organization_invitations SET status='cancelled',version=version+1 WHERE organization_id=$1 AND initial_responsible AND status='pending'",
+          [id],
+        );
+        await c.query(
+          "UPDATE app.invitation_outbox SET delivery_status='cancelled',token_cipher=NULL WHERE invitation_id IN (SELECT id FROM app.organization_invitations WHERE organization_id=$1 AND status='cancelled') AND delivery_status IN ('pending','sending','failed')",
+          [id],
+        );
+      }
       let revoked = 0;
       if (input.to !== "active") {
         for (const table of ["sessions", "checkpoint_credentials", "checkpoint_sessions"]) {
@@ -346,12 +367,15 @@ export function registerOrganizations(
   app.get(base + "/organizations/:id/members", async (req) =>
     transaction(o.pool, async (c) => {
       await guard(req, c);
-      const input = page.strict().parse(req.query),
+      const input = page
+          .extend({ q: z.string().max(254).default("") })
+          .strict()
+          .parse(req.query),
         id = getId(req);
       const rows = (
         await c.query(
-          "SELECT u.id,u.email,u.active user_active,m.active,m.version,m.role FROM app.memberships m JOIN app.users u ON u.id=m.user_id WHERE m.organization_id=$1 AND ($2::uuid IS NULL OR u.id>$2) ORDER BY u.id LIMIT $3",
-          [id, input.cursor ?? null, input.limit + 1],
+          "SELECT u.id,u.email,u.active user_active,u.version user_version,u.must_change_password,EXISTS(SELECT 1 FROM app.platform_privileges p WHERE p.user_id=u.id AND p.state IN ('active','invited')) is_superadmin,m.active,m.version,m.role FROM app.memberships m JOIN app.users u ON u.id=m.user_id WHERE m.organization_id=$1 AND ($2::uuid IS NULL OR u.id>$2) AND u.email ILIKE $4 ORDER BY u.id LIMIT $3",
+          [id, input.cursor ?? null, input.limit + 1, "%" + input.q + "%"],
         )
       ).rows;
       return {
@@ -397,7 +421,11 @@ export function registerOrganizations(
   });
   app.post(base + "/invitations", async (req, reply) => {
     const input = z
-      .object({ kind: z.literal("organization_admin"), email, organization_id: uuid })
+      .object({
+        kind: z.literal("organization_admin"),
+        email,
+        organization_id: uuid,
+      })
       .strict()
       .parse(req.body);
     const r = await service.write(

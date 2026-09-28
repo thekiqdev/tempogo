@@ -47,7 +47,8 @@ function Auth({ onLogin }: { onLogin: (u: User) => void }) {
   );
   const [email, setEmail] = useState(""),
     [password, setPassword] = useState(""),
-    [confirm, setConfirm] = useState("");
+    [confirm, setConfirm] = useState(""),
+    [temporaryPassword, setTemporaryPassword] = useState("");
   const [organizations, setOrganizations] = useState<{ id: string; name: string }[]>([]),
     [org, setOrg] = useState("");
   const [error, setError] = useState(""),
@@ -63,18 +64,39 @@ function Auth({ onLogin }: { onLogin: (u: User) => void }) {
     setBusy(true);
     try {
       if (mode === "login") {
-        const result = await api<User | { organizations: { id: string; name: string }[] }>(
-          "/auth/admin/login",
-          "POST",
-          { email, password, ...(org ? { organization_id: org } : {}) },
-        );
-        if ("organizations" in result) {
+        const result = await api<
+          | User
+          | { organizations: { id: string; name: string }[] }
+          | { password_change_required: true }
+        >("/auth/admin/login", "POST", {
+          email,
+          password,
+          ...(org ? { organization_id: org } : {}),
+        });
+        if ("password_change_required" in result) {
+          setTemporaryPassword(password);
+          setPassword("");
+          setConfirm("");
+          setMode("change-initial");
+        } else if ("organizations" in result) {
           setOrganizations(result.organizations);
           setOrg(result.organizations[0]?.id ?? "");
         } else {
           setCsrf(result.csrf_token);
           onLogin(result);
         }
+      } else if (mode === "change-initial") {
+        if (password !== confirm) throw new Error("As senhas devem ser iguais.");
+        const r = await api<{ message: string }>("/auth/password/change-initial", "POST", {
+          email,
+          password: temporaryPassword,
+          new_password: password,
+        });
+        setTemporaryPassword("");
+        setPassword("");
+        setConfirm("");
+        setMode("login");
+        setNotice(r.message);
       } else if (mode === "forgot") {
         const r = await api<{ message: string }>("/auth/password/forgot", "POST", { email });
         setNotice(r.message);
@@ -129,7 +151,7 @@ function Auth({ onLogin }: { onLogin: (u: User) => void }) {
                 : "Escolha uma senha com pelo menos 12 caracteres."}
           </p>
           <form onSubmit={submit}>
-            {mode !== "reset" && (
+            {mode !== "reset" && mode !== "change-initial" && (
               <label>
                 Email
                 <input
@@ -147,15 +169,19 @@ function Auth({ onLogin }: { onLogin: (u: User) => void }) {
                 <input
                   type="password"
                   required
-                  minLength={mode === "reset" ? 12 : 1}
+                  minLength={mode === "reset" || mode === "change-initial" ? 12 : 1}
                   maxLength={128}
-                  autoComplete={mode === "reset" ? "new-password" : "current-password"}
+                  autoComplete={
+                    mode === "reset" || mode === "change-initial"
+                      ? "new-password"
+                      : "current-password"
+                  }
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                 />
               </label>
             )}
-            {mode === "reset" && (
+            {(mode === "reset" || mode === "change-initial") && (
               <label>
                 Confirmar senha
                 <input

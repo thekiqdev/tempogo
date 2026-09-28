@@ -35,6 +35,10 @@ type Entry = {
 type Page<T> = { items: T[]; next_cursor: string | null; from?: string; to?: string };
 const actionLabels: Record<string, string> = {
   "organization.created": "Organização criada",
+  "platform.created": "Superadmin cadastrado",
+  "member.added": "Acesso adicionado à organização",
+  "password.admin_changed": "Senha temporária definida pelo superadmin",
+  "password.initial_changed": "Senha temporária substituída pelo titular",
   "organization.updated": "Cadastro atualizado",
   "organization.active": "Organização reativada",
   "organization.suspended": "Organização suspensa",
@@ -114,7 +118,7 @@ export function OverviewPanel() {
               </li>
             ))}
             <li>
-              <a href="/plataforma/pessoas">
+              <a href="/plataforma/organizacoes">
                 Contas: <strong>{overview.users}</strong> ({overview.active_users} ativas)
               </a>
             </li>

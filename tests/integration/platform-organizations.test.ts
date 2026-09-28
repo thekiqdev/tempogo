@@ -18,7 +18,10 @@ test("SA03: organizações, convites, outbox, isolamento e suspensão", async (t
   const url = new URL(original);
   url.pathname = "/" + name;
   const db = new pg.Pool({ connectionString: url.href }),
-    tenant = new pg.Pool({ connectionString: url.href, options: "-c role=cronocheckpoint_app" }),
+    tenant = new pg.Pool({
+      connectionString: url.href,
+      options: "-c role=cronocheckpoint_app",
+    }),
     platform = new pg.Pool({
       connectionString: url.href,
       options: "-c role=cronocheckpoint_platform",
@@ -65,7 +68,12 @@ test("SA03: organizações, convites, outbox, isolamento e suspensão", async (t
     app.inject({
       method: body === undefined ? "GET" : (method as "POST"),
       url: "/api/v1/platform" + path,
-      headers: { origin, cookie, "x-csrf-token": csrfFor(raw), "idempotency-key": key },
+      headers: {
+        origin,
+        cookie,
+        "x-csrf-token": csrfFor(raw),
+        "idempotency-key": key,
+      },
       payload: body,
     });
   let org: any,
@@ -98,16 +106,21 @@ test("SA03: organizações, convites, outbox, isolamento e suspensão", async (t
           (
             await call(
               "/organizations/" + org.id,
-              { name: "Alteração bloqueada", contact_email: ownerEmail, version: org.version },
+              {
+                name: body.name,
+                contact_email: ownerEmail,
+                version: org.version,
+              },
               randomUUID(),
               "PATCH",
             )
           ).statusCode,
-          403,
+          200,
         );
         await db.query(
           "UPDATE app.platform_sessions SET reauthenticated_until=now()+interval '5 minutes'",
         );
+        org.version += 1;
         invite = r.json().invitation;
         assert.equal(org.status, "pending");
         assert.equal((await call("/organizations", body, key)).json().organization.id, org.id);
@@ -168,7 +181,12 @@ test("SA03: organizações, convites, outbox, isolamento e suspensão", async (t
         await deliverInvitations(options);
         const rawInvite = sent.at(-1)!.raw;
         assert.equal(
-          (await call("/invitations/accept", { token: rawInvite, password: "wrong" })).statusCode,
+          (
+            await call("/invitations/accept", {
+              token: rawInvite,
+              password: "wrong",
+            })
+          ).statusCode,
           401,
         );
         assert.equal(

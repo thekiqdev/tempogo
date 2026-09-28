@@ -150,6 +150,70 @@ test("SA04: contas, privilégios, recuperação e último administrador", async 
         "active",
       );
     });
+    await t.test(
+      "cadastro direto sem SMTP preserva MFA, idempotência e contas existentes",
+      async () => {
+        const before = sent.length;
+        const body = { email: "direct@sa04.test", password: "Direct-admin-password-123" };
+        const commandKey = randomUUID();
+        const create = (payload = body, cookie = "cc_platform_session=" + raw) =>
+          app.inject({
+            method: "POST",
+            url: "/api/v1/platform/super-admins",
+            headers: {
+              origin,
+              cookie,
+              "x-csrf-token": csrfFor(raw),
+              "idempotency-key": commandKey,
+            },
+            payload,
+          });
+        assert.equal((await create(body, "")).statusCode, 401);
+        await db.query(
+          "UPDATE app.platform_sessions SET reauthenticated_until=NULL WHERE token_hash=$1",
+          [digest(raw)],
+        );
+        assert.equal((await create()).json().error.code, "REAUTH_REQUIRED");
+        await db.query(
+          "UPDATE app.platform_sessions SET reauthenticated_until=now()+interval '5 minutes' WHERE token_hash=$1",
+          [digest(raw)],
+        );
+        const result = await create();
+        assert.equal(result.statusCode, 201, result.body);
+        assert.equal((await create()).json().user.id, result.json().user.id);
+        assert.equal((await create({ ...body, password: "Changed-password-123" })).statusCode, 409);
+        assert.equal((await call("/super-admins", body)).json().error.code, "USER_EXISTS");
+        assert.equal(sent.length, before);
+        assert.equal(
+          (
+            await db.query("SELECT state FROM app.platform_privileges WHERE user_id=$1", [
+              result.json().user.id,
+            ])
+          ).rows[0].state,
+          "invited",
+        );
+        const login = await app.inject({
+          method: "POST",
+          url: "/api/v1/platform/auth/login",
+          headers: { origin },
+          payload: body,
+        });
+        assert.equal(login.statusCode, 202, login.body);
+        assert.ok(!login.cookies.some((c) => c.name === "cc_platform_session"));
+        const cookie = login.cookies.map((c) => c.name + "=" + c.value).join("; ");
+        const enroll = await app.inject({
+          method: "POST",
+          url: "/api/v1/platform/auth/mfa/enroll",
+          headers: { origin, cookie, "x-csrf-token": login.json().csrf_token },
+          payload: {},
+        });
+        assert.equal(enroll.statusCode, 200, enroll.body);
+        const serialized =
+          JSON.stringify((await db.query("SELECT * FROM app.platform_commands")).rows) +
+          JSON.stringify((await db.query("SELECT * FROM app.platform_audit")).rows);
+        assert.ok(!serialized.includes(body.password));
+      },
+    );
     await t.test("último admin organizacional e responsável precisam de substituição", async () => {
       owner = (
         await db.query(

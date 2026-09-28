@@ -127,3 +127,11 @@ Consultar [regras e arquitetura do super admin](39-super-admin-regras-e-arquitet
 ## Reorganização visual do super admin — implementada localmente
 
 [Estudo e plano UX-SA-01 a UX-SA-06](44-estudo-e-plano-ux-super-admin.md): diagnóstico, referência no organizador, navegação e critérios por etapa. [Execução e homologação UX-SA-06](sprints/ux-sa-06-execucao.md).
+
+- [Administração centrada na organização — investigação e plano](48-administracao-por-organizacao.md): usuários na ficha, ativação direta e reset sem SMTP; proposta ainda não implementada.
+
+- [Administração por organização — entrega local](49-administracao-organizacao-entrega.md): funcionalidades, migration 011, testes e limitação da reconfirmação.
+
+- [Painel administrativo guiado](50-painel-admin-guiado.md): plano e entrega local de cadastro em etapas, ativação automática, superadmin sem convite e diálogos mobile.
+
+- [Plano de layout do painel administrativo](51-plano-layout-painel-admin.md): navegação lateral, aproveitamento da tela, direção visual e implantação em cinco etapas.

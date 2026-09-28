@@ -1,4 +1,5 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
+import { OrganizationMembers } from "./organization-members";
 import { useActionConfirmation } from "./platform-dialog";
 import { AuditPanel } from "./platform-overview";
 
@@ -20,9 +21,14 @@ type Invitation = {
   delivery_status: string;
   version: number;
 };
-type Member = { id: string; email: string; active: boolean; user_active: boolean };
+type Member = {
+  id: string;
+  email: string;
+  active: boolean;
+  user_active: boolean;
+};
 const labels: Record<string, string> = {
-  pending: "Pendente",
+  pending: "Cadastro incompleto",
   active: "Ativa",
   suspended: "Suspensa",
   closed: "Encerrada",
@@ -57,9 +63,15 @@ async function api<T>(
 export function Organizations({ csrf, routeId = "" }: { csrf: string; routeId?: string }) {
   const confirmation = useActionConfirmation();
   const params = new URLSearchParams(location.search);
-  const [tab, setTab] = useState(params.get("aba") ?? "resumo");
-  function go(id: string, nextTab = "resumo") {
-    const search = new URLSearchParams({ q, status, ...(id ? { aba: nextTab } : {}) });
+  const [tab, setTab] = useState(params.get("aba") ?? "pessoas");
+  function go(id: string, nextTab = "pessoas") {
+    setNotice("");
+    setError("");
+    const search = new URLSearchParams({
+      q,
+      status,
+      ...(id ? { aba: nextTab } : {}),
+    });
     history.pushState(null, "", "/plataforma/organizacoes" + (id ? "/" + id : "") + "?" + search);
     window.dispatchEvent(new PopStateEvent("popstate"));
     if (location.pathname === "/plataforma/organizacoes" + (id ? "/" + id : "")) setTab(nextTab);
@@ -74,7 +86,6 @@ export function Organizations({ csrf, routeId = "" }: { csrf: string; routeId?: 
     [invitations, setInvitations] = useState<Invitation[]>([]),
     [inviteNext, setInviteNext] = useState<string | null>(null),
     [members, setMembers] = useState<Member[]>([]),
-    [memberNext, setMemberNext] = useState<string | null>(null),
     [running, setRunning] = useState(0),
     [error, setError] = useState(""),
     [notice, setNotice] = useState(""),
@@ -82,19 +93,21 @@ export function Organizations({ csrf, routeId = "" }: { csrf: string; routeId?: 
     [loading, setLoading] = useState(true),
     [ack, setAck] = useState(false),
     [target, setTarget] = useState("suspended"),
-    [inviteEmail, setInviteEmail] = useState(""),
-    [responsible, setResponsible] = useState("");
+    [inviteEmail, setInviteEmail] = useState("");
+  const [pageNumber, setPageNumber] = useState(0),
+    [pageSize, setPageSize] = useState(10),
+    [pageCursors, setPageCursors] = useState<(string | undefined)[]>([undefined]);
+  const appliedFilters = useRef({ q: params.get("q") ?? "", status: params.get("status") ?? "" });
   const [name, setName] = useState(""),
     [email, setEmail] = useState(""),
     [phone, setPhone] = useState(""),
-    [notes, setNotes] = useState(""),
-    [owner, setOwner] = useState("");
+    [notes, setNotes] = useState("");
   const requestKey = useRef<{ signature: string; key: string } | null>(null),
     generation = useRef(0),
     listGeneration = useRef(0);
   async function write<T>(path: string, body: unknown, method = "POST") {
     const data = body as Record<string, unknown>;
-    if ("reason" in data || (path === "/organizations" && method === "POST")) {
+    if ("reason" in data) {
       const action = path.endsWith("/transitions")
         ? "Alterar situação para " + (labels[String(data.to)] ?? data.to)
         : path.endsWith("/responsible")
@@ -102,7 +115,7 @@ export function Organizations({ csrf, routeId = "" }: { csrf: string; routeId?: 
             (members.find((m) => m.id === data.user_id)?.email ?? "o membro selecionado")
           : path.endsWith("/cancel")
             ? "Cancelar convite"
-            : "Criar organização e convidar " + String(data.responsible_email);
+            : "Criar organização";
       const decision = await confirmation.confirm(
         action +
           " — " +
@@ -135,16 +148,30 @@ export function Organizations({ csrf, routeId = "" }: { csrf: string; routeId?: 
       setBusy(false);
     }
   }
-  async function list(cursor?: string) {
+  async function list(cursor?: string, index = 0, filters = { q, status }, size = pageSize) {
     const request = ++listGeneration.current;
-    const r = await api<{ items: Org[]; next_cursor: string | null }>(
-      "/organizations?" +
-        new URLSearchParams({ q, ...(status ? { status } : {}), ...(cursor ? { cursor } : {}) }),
-      csrf,
-    );
-    if (request !== listGeneration.current) return;
-    setRows((v) => (cursor ? [...v, ...r.items] : r.items));
-    setNext(r.next_cursor);
+    setLoading(true);
+    try {
+      const r = await api<{ items: Org[]; next_cursor: string | null }>(
+        "/organizations?" +
+          new URLSearchParams({
+            q: filters.q,
+            limit: String(size),
+            ...(filters.status ? { status: filters.status } : {}),
+            ...(cursor ? { cursor } : {}),
+          }),
+        csrf,
+      );
+      if (request !== listGeneration.current) return;
+      setRows(r.items);
+      setNext(r.next_cursor);
+      setPageNumber(index);
+      setPageSize(size);
+      setPageCursors((v) => (index === 0 ? [undefined] : [...v.slice(0, index), cursor]));
+      appliedFilters.current = filters;
+    } finally {
+      if (request === listGeneration.current) setLoading(false);
+    }
   }
   async function detail(id: string) {
     const version = ++generation.current;
@@ -168,14 +195,12 @@ export function Organizations({ csrf, routeId = "" }: { csrf: string; routeId?: 
     setInvitations(i.items);
     setInviteNext(i.next_cursor);
     setMembers(m.items);
-    setMemberNext(m.next_cursor);
     setRunning(d.usage.running_events);
-    setResponsible(d.organization.responsible_user_id ?? "");
     setTarget(
       d.organization.status === "suspended"
         ? "active"
         : d.organization.status === "pending"
-          ? "closed"
+          ? "active"
           : "suspended",
     );
     setAck(false);
@@ -187,7 +212,7 @@ export function Organizations({ csrf, routeId = "" }: { csrf: string; routeId?: 
     const request = ++listGeneration.current;
     setLoading(true);
     api<{ items: Org[]; next_cursor: string | null }>(
-      "/organizations?" + new URLSearchParams({ q, ...(status ? { status } : {}) }),
+      "/organizations?" + new URLSearchParams({ q, limit: "10", ...(status ? { status } : {}) }),
       csrf,
     )
       .then((r) => {
@@ -208,7 +233,7 @@ export function Organizations({ csrf, routeId = "" }: { csrf: string; routeId?: 
     };
   }, [csrf]);
   useEffect(() => {
-    setTab(new URLSearchParams(location.search).get("aba") ?? "resumo");
+    setTab(new URLSearchParams(location.search).get("aba") ?? "pessoas");
     if (routeId && routeId !== "nova") {
       setSelected(null);
       void run(() => detail(routeId));
@@ -220,12 +245,12 @@ export function Organizations({ csrf, routeId = "" }: { csrf: string; routeId?: 
   }, [routeId]);
   function newOrg() {
     generation.current++;
+    setNotice("");
     setCreating(true);
     setSelected(null);
     setName("");
     setEmail("");
     setPhone("");
-    setOwner("");
     setNotes("");
     setError("");
   }
@@ -238,31 +263,36 @@ export function Organizations({ csrf, routeId = "" }: { csrf: string; routeId?: 
           contact_email: email,
           contact_phone: phone,
           notes,
-          responsible_email: owner,
         });
-        go(r.organization.id, "convites");
+        go(r.organization.id, "pessoas");
         await detail(r.organization.id);
-        setNotice("Organização criada. Convite adicionado à fila de envio.");
+        setNotice("");
       } else if (selected) {
         await write(
           "/organizations/" + selected.id,
-          { version: selected.version, name, contact_email: email, contact_phone: phone, notes },
+          {
+            version: selected.version,
+            name,
+            contact_email: email,
+            contact_phone: phone,
+            notes,
+          },
           "PATCH",
         );
         await detail(selected.id);
-        setNotice("Cadastro atualizado.");
+        if (selected.status === "pending" && !selected.responsible_user_id) {
+          go(selected.id, "pessoas");
+          setNotice("");
+        } else setNotice("Cadastro atualizado.");
       }
       await list();
     });
   }
+  const wizard = creating || (selected?.status === "pending" && !selected.responsible_user_id);
   return (
-    <section className="platform-orgs">
+    <section className={"platform-orgs" + (wizard ? " organization-wizard" : "")}>
       {confirmation.element}
 
-      <p>
-        Sua sessão permite criar organizações. Para alterar cadastros existentes, confirme sua
-        identidade. A confirmação vale cinco minutos.
-      </p>
       {error && (
         <p role="alert" className="error">
           {error}
@@ -270,9 +300,18 @@ export function Organizations({ csrf, routeId = "" }: { csrf: string; routeId?: 
       )}
       {notice && <p role="status">{notice}</p>}
       {!routeId && (
-        <>
+        <section className="organization-directory" aria-label="Lista de organizações">
+          <div className="organization-list-toolbar">
+            <div>
+              <h2>Organizações cadastradas</h2>
+              <p>Localize um cadastro ou crie uma nova organização.</p>
+            </div>
+            <button className="primary" disabled={busy} onClick={() => go("nova")}>
+              Nova organização
+            </button>
+          </div>
           <form
-            className="crm-filters"
+            className="organization-search"
             onSubmit={(e) => {
               e.preventDefault();
               history.replaceState(
@@ -285,7 +324,13 @@ export function Organizations({ csrf, routeId = "" }: { csrf: string; routeId?: 
           >
             <label>
               Pesquisar organização
-              <input value={q} onChange={(e) => setQ(e.target.value)} />
+              <input
+                type="search"
+                maxLength={120}
+                placeholder="Digite o nome da organização"
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+              />
             </label>
             <label>
               Situação
@@ -298,72 +343,235 @@ export function Organizations({ csrf, routeId = "" }: { csrf: string; routeId?: 
                 ))}
               </select>
             </label>
-            <button disabled={busy}>Pesquisar</button>
-          </form>
-          <button className="primary" disabled={busy} onClick={() => go("nova")}>
-            Nova organização
-          </button>
-          <ul className="platform-org-list">
-            {rows.map((o) => (
-              <li key={o.id}>
-                <button disabled={busy} onClick={() => go(o.id)}>
-                  {o.name}
-                </button>{" "}
-                <span className={"crm-badge " + o.status}>{labels[o.status]}</span>
-                <p>{o.contact_email}</p>
-                <p className="muted">Responsável: {o.responsible_email ?? "A definir"}</p>
-              </li>
-            ))}
-          </ul>
-          {loading ? (
-            <p role="status">Carregando organizações…</p>
-          ) : (
-            !rows.length && <p>Nenhuma organização encontrada.</p>
-          )}
-          {next && (
-            <button disabled={busy} onClick={() => void run(() => list(next))}>
-              Mais organizações
+            <button className="primary" disabled={busy || loading}>
+              Pesquisar
             </button>
+            <button
+              type="button"
+              disabled={
+                busy ||
+                loading ||
+                (!q && !status && !appliedFilters.current.q && !appliedFilters.current.status)
+              }
+              onClick={() => {
+                setQ("");
+                setStatus("");
+                history.replaceState(null, "", "/plataforma/organizacoes");
+                void run(() => list(undefined, 0, { q: "", status: "" }));
+              }}
+            >
+              Limpar filtros
+            </button>
+          </form>
+          {loading && <p role="status">Carregando organizações…</p>}
+          <table
+            className="organization-table"
+            aria-label="Organizações cadastradas"
+            aria-busy={loading}
+          >
+            <thead>
+              <tr>
+                <th scope="col">Organização</th>
+                <th scope="col">Contato</th>
+                <th scope="col">Responsável</th>
+                <th scope="col">Situação</th>
+                <th scope="col">Ações</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((o) => (
+                <tr
+                  key={o.id}
+                  className="organization-clickable-row"
+                  tabIndex={busy || loading ? -1 : 0}
+                  aria-label={"Abrir organização " + o.name}
+                  onClick={(e) => {
+                    if (
+                      !busy &&
+                      !loading &&
+                      !(e.target as HTMLElement).closest("button,a,input,select")
+                    )
+                      go(o.id);
+                  }}
+                  onKeyDown={(e) => {
+                    if (
+                      e.target === e.currentTarget &&
+                      !busy &&
+                      !loading &&
+                      (e.key === "Enter" || e.key === " ")
+                    ) {
+                      e.preventDefault();
+                      go(o.id);
+                    }
+                  }}
+                >
+                  <td data-label="Organização">
+                    <button
+                      className="organization-name"
+                      disabled={busy || loading}
+                      onClick={() => go(o.id)}
+                      title={o.name}
+                    >
+                      {o.name}
+                    </button>
+                  </td>
+                  <td data-label="Contato">
+                    <span className="organization-cell-text" title={o.contact_email}>
+                      {o.contact_email}
+                    </span>
+                  </td>
+                  <td data-label="Responsável">
+                    <span className="organization-cell-text" title={o.responsible_email}>
+                      {o.responsible_email ?? "A definir"}
+                    </span>
+                  </td>
+                  <td data-label="Situação">
+                    <span className={"crm-badge " + o.status}>{labels[o.status]}</span>
+                  </td>
+                  <td data-label="Ações">
+                    <div className="organization-row-actions">
+                      <button
+                        disabled={busy || loading}
+                        aria-label={"Usuários de " + o.name}
+                        onClick={() => go(o.id)}
+                      >
+                        {o.status === "pending" ? "Continuar" : "Usuários"}
+                      </button>
+                      <button
+                        disabled={busy || loading}
+                        aria-label={"Editar " + o.name}
+                        onClick={() => go(o.id, "cadastro")}
+                      >
+                        Editar
+                      </button>
+                      <button
+                        disabled={busy || loading}
+                        aria-label={"Configurar " + o.name}
+                        onClick={() => go(o.id, "configuracoes")}
+                      >
+                        Configurar
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!loading && !rows.length && (
+            <p className="organization-empty">
+              Nenhuma organização encontrada. Ajuste os filtros ou crie um novo cadastro.
+            </p>
           )}
-        </>
+          <nav className="organization-pagination" aria-label="Paginação de organizações">
+            <label>
+              Por página
+              <select
+                aria-label="Por página"
+                value={pageSize}
+                disabled={busy || loading}
+                onChange={(e) =>
+                  void run(() => list(undefined, 0, appliedFilters.current, Number(e.target.value)))
+                }
+              >
+                {[10, 25, 50].map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <p role="status">
+              Página {pageNumber + 1} · {rows.length} organização(ões)
+            </p>
+            <div>
+              <button
+                disabled={busy || loading || pageNumber === 0}
+                onClick={() =>
+                  void run(() =>
+                    list(pageCursors[pageNumber - 1], pageNumber - 1, appliedFilters.current),
+                  )
+                }
+              >
+                Anterior
+              </button>
+              <button
+                disabled={busy || loading || !next}
+                onClick={() => void run(() => list(next!, pageNumber + 1, appliedFilters.current))}
+              >
+                Próxima
+              </button>
+            </div>
+          </nav>
+        </section>
       )}
-      {routeId && <button onClick={() => go("")}>← Voltar às organizações</button>}
+      {routeId && (
+        <button disabled={busy} onClick={() => go("")}>
+          ← Voltar às organizações
+        </button>
+      )}
       {(creating || selected) && (
-        <section>
-          <h3>{creating ? "Cadastrar organização" : selected?.name}</h3>
-          {selected && (
+        <section className={!wizard ? "organization-detail" : undefined}>
+          <div className="organization-detail-heading">
+            <h3>{creating ? "Cadastrar organização" : selected?.name}</h3>
+            {selected && !wizard && (
+              <p className="organization-contact">
+                {selected.contact_email}
+                {selected.contact_phone ? " · " + selected.contact_phone : ""}
+              </p>
+            )}
+          </div>
+          {(creating || (selected?.status === "pending" && !selected.responsible_user_id)) && (
+            <ol className="setup-steps" aria-label="Etapas do cadastro">
+              <li aria-current={creating || tab === "cadastro" ? "step" : undefined}>
+                1. Organização
+              </li>
+              <li aria-current={!creating && tab !== "cadastro" ? "step" : undefined}>
+                2. Usuário e conclusão
+              </li>
+            </ol>
+          )}
+          {creating && <p>Informe os dados principais para continuar.</p>}
+          {selected && (selected.status !== "pending" || selected.responsible_user_id) && (
             <p>
               {labels[selected.status]} · {running} prova(s) em andamento
             </p>
           )}
           {selected && (
-            <nav className="crm-tabs" aria-label="Ficha da organização">
-              {[
-                ["resumo", "Resumo"],
-                ["cadastro", "Cadastro"],
-                ["pessoas", "Pessoas e acessos"],
-                ["convites", "Convites"],
-                ["historico", "Histórico"],
-              ].map(([v, n]) => (
-                <button
-                  key={v}
-                  aria-current={tab === v ? "page" : undefined}
-                  onClick={() => {
-                    setTab(v!);
-                    history.replaceState(
-                      null,
-                      "",
-                      "/plataforma/organizacoes/" +
-                        selected.id +
-                        "?" +
-                        new URLSearchParams({ q, status, aba: v! }),
-                    );
-                  }}
-                >
-                  {n}
-                </button>
-              ))}
-            </nav>
+            <details
+              className="organization-navigation"
+              open={selected.status !== "pending" || !!selected.responsible_user_id}
+            >
+              <summary hidden={selected.status !== "pending" || !!selected.responsible_user_id}>
+                Outras opções da organização
+              </summary>
+              <nav className="crm-tabs" aria-label="Ficha da organização">
+                {[
+                  ["pessoas", "Usuários e acessos"],
+                  ["cadastro", "Dados da organização"],
+                  ["configuracoes", "Configurações"],
+                  ["convites", "Convites"],
+                  ["historico", "Histórico"],
+                ].map(([v, n]) => (
+                  <button
+                    key={v}
+                    aria-current={tab === v ? "page" : undefined}
+                    onClick={() => {
+                      setTab(v!);
+                      history.replaceState(
+                        null,
+                        "",
+                        "/plataforma/organizacoes/" +
+                          selected.id +
+                          "?" +
+                          new URLSearchParams({ q, status, aba: v! }),
+                      );
+                    }}
+                  >
+                    {n}
+                  </button>
+                ))}
+              </nav>
+            </details>
           )}
           {selected && tab === "resumo" && (
             <div className="crm-summary">
@@ -392,48 +600,53 @@ export function Organizations({ csrf, routeId = "" }: { csrf: string; routeId?: 
             </div>
           )}
           {selected && tab === "historico" && <AuditPanel organizationId={selected.id} />}
-          <form data-draft="true" hidden={!creating && tab !== "cadastro"} onSubmit={save}>
-            <label>
-              Nome da organização
-              <input
-                required
-                minLength={2}
-                maxLength={120}
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-              />
-            </label>
-            <label>
-              Email de contato
-              <input
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-            </label>
-            <label>
-              Telefone
-              <input maxLength={30} value={phone} onChange={(e) => setPhone(e.target.value)} />
-            </label>
-            {creating && (
+          <form
+            className="organization-data-form"
+            data-draft="true"
+            hidden={!creating && tab !== "cadastro"}
+            onSubmit={save}
+          >
+            <div className="organization-field-grid">
               <label>
-                Email do primeiro responsável
+                Nome da organização
+                <input
+                  required
+                  minLength={2}
+                  maxLength={120}
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                />
+              </label>
+              <label>
+                Email de contato
                 <input
                   type="email"
                   required
-                  value={owner}
-                  onChange={(e) => setOwner(e.target.value)}
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
                 />
               </label>
-            )}
-            <label>
-              Observações administrativas
-              <textarea maxLength={2000} value={notes} onChange={(e) => setNotes(e.target.value)} />
-            </label>
-            <button className="primary" disabled={busy || selected?.status === "closed"}>
-              {creating ? "Criar e convidar" : "Salvar cadastro"}
-            </button>
+            </div>
+            <details className="organization-optional" open={!!phone || !!notes}>
+              <summary>Dados adicionais (opcional)</summary>
+              <label>
+                Telefone
+                <input maxLength={30} value={phone} onChange={(e) => setPhone(e.target.value)} />
+              </label>
+              <label>
+                Observações administrativas
+                <textarea
+                  maxLength={2000}
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                />
+              </label>
+            </details>
+            <div className="organization-form-actions">
+              <button className="primary" disabled={busy || selected?.status === "closed"}>
+                {busy ? "Salvando…" : creating ? "Continuar para o usuário" : "Salvar cadastro"}
+              </button>
+            </div>
           </form>
           {selected && (
             <>
@@ -512,7 +725,10 @@ export function Organizations({ csrf, routeId = "" }: { csrf: string; routeId?: 
                     disabled={busy}
                     onClick={() =>
                       void run(async () => {
-                        const r = await api<{ items: Invitation[]; next_cursor: string | null }>(
+                        const r = await api<{
+                          items: Invitation[];
+                          next_cursor: string | null;
+                        }>(
                           "/invitations?organization_id=" + selected.id + "&cursor=" + inviteNext,
                           csrf,
                         );
@@ -525,69 +741,38 @@ export function Organizations({ csrf, routeId = "" }: { csrf: string; routeId?: 
                   </button>
                 )}
               </div>
-              <div hidden={tab !== "pessoas" && tab !== "resumo" && tab !== "convites"}>
-                <div hidden={tab !== "pessoas"}>
-                  <ul className="crm-members">
-                    {members.map((m) => (
-                      <li key={m.id}>
-                        {m.email} · {m.active && m.user_active ? "Ativo" : "Bloqueado"}
-                      </li>
-                    ))}
-                  </ul>
-                  <label>
-                    Responsável
-                    <select value={responsible} onChange={(e) => setResponsible(e.target.value)}>
-                      <option value="">Selecione um administrador ativo</option>
-                      {members
-                        .filter((m) => m.active && m.user_active)
-                        .map((m) => (
-                          <option key={m.id} value={m.id}>
-                            {m.email}
-                          </option>
-                        ))}
-                    </select>
-                  </label>
-                  {memberNext && (
-                    <button
-                      disabled={busy}
-                      onClick={() =>
-                        void run(async () => {
-                          const r = await api<{ items: Member[]; next_cursor: string | null }>(
-                            "/organizations/" + selected.id + "/members?cursor=" + memberNext,
-                            csrf,
-                          );
-                          setMembers((v) => [...v, ...r.items]);
-                          setMemberNext(r.next_cursor);
-                        })
-                      }
-                    >
-                      Mais administradores
-                    </button>
-                  )}
-                  <button
-                    disabled={busy || !responsible || selected.status === "closed"}
-                    onClick={() =>
-                      void run(async () => {
-                        await write("/organizations/" + selected.id + "/responsible", {
-                          version: selected.version,
-                          user_id: responsible,
-                          reason: "",
-                        });
-                        await detail(selected.id);
-                      })
-                    }
-                  >
-                    Alterar responsável
-                  </button>
-                </div>
-                {tab === "resumo" && selected.status !== "closed" && (
-                  <details className="crm-sensitive">
-                    <summary>Alterar situação da organização</summary>
+              <div
+                hidden={
+                  tab !== "pessoas" &&
+                  tab !== "resumo" &&
+                  tab !== "convites" &&
+                  tab !== "configuracoes"
+                }
+              >
+                {tab === "pessoas" && (
+                  <OrganizationMembers
+                    key={selected.id}
+                    id={selected.id}
+                    setup={selected.status === "pending" && !selected.responsible_user_id}
+                    version={selected.version}
+                    status={selected.status}
+                    responsibleId={selected.responsible_user_id}
+                    csrf={csrf}
+                    onBack={() => go(selected.id, "cadastro")}
+                    onChange={() => detail(selected.id)}
+                  />
+                )}
+                {(tab === "resumo" || tab === "configuracoes") && selected.status !== "closed" && (
+                  <section className="crm-sensitive">
+                    <h3>Situação da organização</h3>
+                    {selected.status === "pending" && !selected.responsible_user_id && (
+                      <p>Adicione um usuário responsável acima para poder ativar a organização.</p>
+                    )}
                     <label>
                       Próxima situação
                       <select value={target} onChange={(e) => setTarget(e.target.value)}>
                         {(selected.status === "pending"
-                          ? ["closed"]
+                          ? ["active", "closed"]
                           : selected.status === "suspended"
                             ? ["active", "closed"]
                             : ["suspended", "closed"]
@@ -612,7 +797,9 @@ export function Organizations({ csrf, routeId = "" }: { csrf: string; routeId?: 
                       andamento.
                     </label>
                     <button
-                      disabled={busy || !ack}
+                      disabled={
+                        busy || !ack || (target === "active" && !selected.responsible_user_id)
+                      }
                       onClick={() =>
                         void run(async () => {
                           await write("/organizations/" + selected.id + "/transitions", {
@@ -627,9 +814,15 @@ export function Organizations({ csrf, routeId = "" }: { csrf: string; routeId?: 
                         })
                       }
                     >
-                      Confirmar situação
+                      {target === "active"
+                        ? selected.status === "pending"
+                          ? "Ativar organização"
+                          : "Reativar organização"
+                        : target === "suspended"
+                          ? "Suspender organização"
+                          : "Encerrar organização"}
                     </button>
-                  </details>
+                  </section>
                 )}
               </div>
             </>

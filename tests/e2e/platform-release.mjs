@@ -126,14 +126,11 @@ try {
   await page.getByRole("button", { name: "Nova organização", exact: true }).click();
   await page.getByLabel("Nome da organização", { exact: true }).fill("Organização E2E SA03");
   await page.getByLabel("Email de contato", { exact: true }).fill("owner@browser.test");
-  await page
-    .getByLabel("Email do primeiro responsável", { exact: true })
-    .fill("owner@browser.test");
-  await page.getByRole("button", { name: "Criar e convidar", exact: true }).click();
-  await page.getByRole("button", { name: "Confirmar ação", exact: true }).click();
-  await expect(page.locator(".platform-orgs").getByRole("status")).toContainText(
-    "Organização criada",
-  );
+  await page.getByRole("button", { name: "Continuar para o usuário", exact: true }).click();
+  await page.getByText("Outras opções da organização", { exact: true }).click();
+  await page.getByRole("button", { name: "Convites", exact: true }).click();
+  await page.getByLabel("Email do administrador convidado").fill("owner@browser.test");
+  await page.getByRole("button", { name: "Enviar convite", exact: true }).click();
   await expect
     .poll(() => delivered.filter((m) => m.kind === "invitation").length, { timeout: 20000 })
     .toBe(1);
@@ -148,26 +145,22 @@ try {
   await expect(ownerPage.getByRole("status")).toContainText("Convite aceito");
   await page.getByRole("button", { name: "Atualizar situação", exact: true }).click();
   await expect(page.getByText("Ativa · 0 prova(s) em andamento", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Resumo", exact: true }).click();
-  await page.getByText("Alterar situação da organização", { exact: true }).click();
+  await page.getByRole("button", { name: "Configurações", exact: true }).click();
 
   await page.getByRole("checkbox").check();
-  await page.getByRole("button", { name: "Confirmar situação", exact: true }).click();
+  await page.getByRole("button", { name: "Suspender organização", exact: true }).click();
   await page.getByLabel("Motivo desta ação").fill("Alteração administrativa sintética da situação");
   await page.getByRole("button", { name: "Confirmar ação", exact: true }).click();
   await expect(page.getByText("Suspensa · 0 prova(s) em andamento", { exact: true })).toBeVisible();
 
   await page.getByRole("checkbox").check();
-  await page.getByRole("button", { name: "Confirmar situação", exact: true }).click();
+  await page.getByRole("button", { name: "Reativar organização", exact: true }).click();
   await page.getByLabel("Motivo desta ação").fill("Alteração administrativa sintética da situação");
   await page.getByRole("button", { name: "Confirmar ação", exact: true }).click();
   await expect(page.getByText("Ativa · 0 prova(s) em andamento", { exact: true })).toBeVisible();
-  await page.locator(".crm-sidebar").getByRole("link", { name: "Pessoas", exact: true }).click();
-  const accounts = page.locator(".platform-accounts");
-  await accounts.getByLabel("Pesquisar conta por email").fill("owner@browser.test");
-  await accounts.getByRole("button", { name: "Pesquisar contas", exact: true }).click();
-  await accounts.getByRole("button", { name: "owner@browser.test", exact: true }).click();
-
+  await page.getByRole("button", { name: "Usuários e acessos", exact: true }).click();
+  let accounts = page.locator(".organization-members");
+  await accounts.getByRole("button", { name: "Alterar email", exact: true }).click();
   await accounts.getByLabel("Novo email de acesso").fill("updated@browser.test");
   await accounts.getByRole("button", { name: "Solicitar alteração de email", exact: true }).click();
   await page.getByLabel("Motivo desta ação").fill("Atualização cadastral de teste");
@@ -185,22 +178,18 @@ try {
     .locator(".crm-sidebar")
     .getByRole("link", { name: "Super admins", exact: true })
     .click();
-  await accounts.getByLabel("Email do novo super admin").fill("second@browser.test");
-  await accounts.getByRole("button", { name: "Convidar super admin", exact: true }).click();
-  await page.getByRole("button", { name: "Confirmar ação", exact: true }).click();
-  await expect
-    .poll(() => delivered.some((m) => m.kind === "super-invitation"), { timeout: 25000 })
-    .toBe(true);
-  await ownerPage.goto("about:blank");
-  await ownerPage.goto(
-    origin + "/plataforma#super-invite=" + delivered.find((m) => m.kind === "super-invitation").raw,
-  );
-  await ownerPage.getByLabel("Senha", { exact: true }).fill("Second-browser-password-123");
-  await ownerPage
-    .getByLabel("Confirmar senha", { exact: true })
+  accounts = page.locator(".platform-accounts");
+  await accounts.getByRole("button", { name: "Novo superadmin", exact: true }).click();
+  await page.getByLabel("Email do novo superadmin", { exact: true }).fill("second@browser.test");
+  await page
+    .getByLabel("Senha do novo superadmin", { exact: true })
     .fill("Second-browser-password-123");
-  await ownerPage.getByRole("button", { name: "Aceitar convite", exact: true }).click();
-  await expect(ownerPage.getByRole("status")).toContainText("MFA");
+  await page.getByLabel("Confirmar senha", { exact: true }).fill("Second-browser-password-123");
+  await page.getByRole("button", { name: "Cadastrar superadmin", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "second@browser.test", exact: true }),
+  ).toBeVisible();
+  await ownerPage.goto("about:blank");
   await ownerPage.goto(origin + "/plataforma");
   await ownerPage.getByLabel("Email", { exact: true }).fill("second@browser.test");
   await ownerPage.getByLabel("Senha", { exact: true }).fill("Second-browser-password-123");
@@ -233,11 +222,11 @@ try {
   await page.getByRole("button", { name: "Nova organização", exact: true }).click();
   await page.getByLabel("Nome da organização", { exact: true }).fill("Segunda organização SA06");
   await page.getByLabel("Email de contato", { exact: true }).fill("owner-two@browser.test");
-  await page
-    .getByLabel("Email do primeiro responsável", { exact: true })
-    .fill("owner-two@browser.test");
-  await page.getByRole("button", { name: "Criar e convidar", exact: true }).click();
-  await page.getByRole("button", { name: "Confirmar ação", exact: true }).click();
+  await page.getByRole("button", { name: "Continuar para o usuário", exact: true }).click();
+  await page.getByText("Outras opções da organização", { exact: true }).click();
+  await page.getByRole("button", { name: "Convites", exact: true }).click();
+  await page.getByLabel("Email do administrador convidado").fill("owner-two@browser.test");
+  await page.getByRole("button", { name: "Enviar convite", exact: true }).click();
   await expect
     .poll(() => delivered.some((m) => m.email === "owner-two@browser.test"), { timeout: 25000 })
     .toBe(true);
@@ -255,19 +244,14 @@ try {
   await expect(secondOwner.getByRole("status")).toContainText("Convite aceito");
   await secondOwner.close();
   const mailbox = await (await fetch("http://127.0.0.1:8025/api/v1/messages")).json();
-  for (const address of [
-    "owner@browser.test",
-    "owner-two@browser.test",
-    "second@browser.test",
-    "updated@browser.test",
-  ])
+  for (const address of ["owner@browser.test", "owner-two@browser.test", "updated@browser.test"])
     assert.ok(mailbox.messages.some((m) => m.To.some((t) => t.Address === address)));
   await mkdir("tmp/ux-sa-06/browser", { recursive: true });
   await page.screenshot({ path: "tmp/ux-sa-06/browser/panel-desktop.png", fullPage: true });
   await page.reload();
   await expect(page.getByRole("heading", { name: "Organizações", level: 1 })).toBeVisible();
   await expect(page.locator(".platform-orgs")).toContainText("Segunda organização SA06");
-  await page.getByRole("button", { name: "Cadastro", exact: true }).click();
+  await page.getByRole("button", { name: "Dados da organização", exact: true }).click();
   await page.getByLabel("Nome da organização", { exact: true }).fill("Rascunho não salvo");
   await page
     .locator(".crm-sidebar")

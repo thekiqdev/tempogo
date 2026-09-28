@@ -91,6 +91,40 @@ export function registerAccounts(app: FastifyInstance, o: PlatformOptions, guard
       [id, u, recipient, kind, cipher.seal(raw, "account:" + id), raw ? digest(raw) : null],
     );
   }
+  app.post(base + "/super-admins", async (req, reply) => {
+    const input = z
+      .object({ email, password: z.string().min(12).max(128) })
+      .strict()
+      .parse(req.body);
+    const result = await service.write(
+      req,
+      "platform.create",
+      input,
+      undefined,
+      async (c, actor) => {
+        if ((await c.query("SELECT 1 FROM app.users WHERE email=$1", [input.email])).rowCount)
+          throw failure(
+            "USER_EXISTS",
+            "Email já cadastrado. Use um email novo; este cadastro não altera contas existentes.",
+          );
+        const u = (
+          await c.query(
+            "INSERT INTO app.users(email,password_hash) VALUES($1,$2) RETURNING id,email",
+            [input.email, await hashPassword(input.password)],
+          )
+        ).rows[0];
+        await c.query("INSERT INTO app.platform_privileges(user_id,state) VALUES($1,'invited')", [
+          u.id,
+        ]);
+        await managementAudit(c, actor, null, "platform.created", u.id, req.id, {
+          enrollment_required: true,
+        });
+        return { user: u, mfa_required: true };
+      },
+    );
+    reply.code(201);
+    return result;
+  });
   app.get(base + "/users", async (req) => {
     const q = z
       .object({
