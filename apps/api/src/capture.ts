@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import type pg from "pg";
 import { z } from "zod";
@@ -11,6 +11,15 @@ import { csrfFor, digest, equal, hashPassword, token, verifyPassword } from "./s
 
 const uuid = z.string().uuid();
 const cookieName = "cc_checkpoint";
+function accessToken(credential: { id: string; password_hash: string }) {
+  return (
+    credential.id +
+    "." +
+    createHmac("sha256", credential.password_hash)
+      .update("tempogo:field-login:v1:" + credential.id)
+      .digest("hex")
+  );
+}
 type Field = {
   id: string;
   organization_id: string;
@@ -31,6 +40,18 @@ export function registerCapture(
   auth: ReturnType<typeof authService>,
 ) {
   const { pool } = options;
+  function withLink(credential: Record<string, any>) {
+    const { password_hash, ...publicFields } = credential;
+    return {
+      ...publicFields,
+      access_url:
+        credential.revoked_at || Date.parse(credential.expires_at) <= Date.now()
+          ? null
+          : options.origin +
+            "/checkpoint#access=" +
+            accessToken({ id: credential.id, password_hash }),
+    };
+  }
   app.addHook("onRequest", async (req, reply) => {
     if (req.url.startsWith("/api/v1/field") || req.url.includes("/access"))
       reply.header("Cache-Control", "no-store");
@@ -90,6 +111,8 @@ export function registerCapture(
     const input = z
       .object({
         label: z.string().trim().min(2).max(80),
+        replace_access_id: uuid.optional(),
+        operator_name: z.string().trim().max(120).default(""),
         expires_at: z.string().datetime({ offset: true }),
       })
       .strict()
@@ -113,11 +136,43 @@ export function registerCapture(
         const event = await eventLock(c, a.organization_id, p.event_id);
         if (["finalized", "archived"].includes(event.state))
           throw new HttpError(409, "EVENT_FINALIZED", "Reabra o evento antes de emitir acesso");
+        if (input.replace_access_id) {
+          const previous = (
+            await c.query(
+              "UPDATE app.checkpoint_credentials SET revoked_at=now() WHERE organization_id=$1 AND checkpoint_id=$2 AND id=$3 AND revoked_at IS NULL RETURNING id",
+              [a.organization_id, id, input.replace_access_id],
+            )
+          ).rows[0];
+          if (!previous)
+            throw new HttpError(
+              409,
+              "ACCESS_CHANGED",
+              "Este acesso já foi revogado ou não pertence ao checkpoint. Atualize a lista.",
+            );
+          await audit(
+            c,
+            a.organization_id,
+            a.user_id,
+            "checkpoint.access_revoked",
+            previous.id,
+            { event_id: p.event_id, checkpoint_id: id, replacement: true },
+            req.id,
+          );
+        }
         const r = (
           await c.query(
-            `INSERT INTO app.checkpoint_credentials(organization_id,event_id,checkpoint_id,code,password_hash,label,expires_at)
-    VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id,code,label,device_id,expires_at,revoked_at`,
-            [a.organization_id, p.event_id, id, code, hash, input.label, expiry],
+            `INSERT INTO app.checkpoint_credentials(organization_id,event_id,checkpoint_id,code,password_hash,label,expires_at,operator_name)
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id,code,label,operator_name,device_id,expires_at,revoked_at,password_hash`,
+            [
+              a.organization_id,
+              p.event_id,
+              id,
+              code,
+              hash,
+              input.label,
+              expiry,
+              input.operator_name,
+            ],
           )
         ).rows[0];
         await audit(
@@ -126,7 +181,12 @@ export function registerCapture(
           a.user_id,
           "checkpoint.access_created",
           r.id,
-          { event_id: p.event_id, checkpoint_id: id, label: input.label },
+          {
+            event_id: p.event_id,
+            checkpoint_id: id,
+            label: input.label,
+            operator_name: input.operator_name,
+          },
           req.id,
         );
         return r;
@@ -134,21 +194,33 @@ export function registerCapture(
       a.organization_id,
     );
     reply.code(201);
-    return { ...result, password };
+    return { ...withLink(result), password };
   });
   app.get("/api/v1/checkpoints/:id/access", async (req) => {
     const a = await auth.authenticate(req),
       id = uuid.parse((req.params as { id: string }).id);
-    return {
-      items: (
-        await pool.query(
-          `SELECT id,code,label,device_id,expires_at,revoked_at FROM app.checkpoint_credentials
-   WHERE organization_id=$1 AND checkpoint_id=$2 ORDER BY created_at DESC`,
-          [a.organization_id, id],
-        )
-      ).rows,
-    };
+    return transaction(
+      pool,
+      async (c) => ({
+        items: (
+          await c.query(
+            `SELECT cr.password_hash,cr.id,cr.code,cr.label,cr.operator_name,cr.device_id,cr.expires_at,cr.revoked_at,
+        d.last_seen_at,d.pending,d.sending,d.synced,d.blocked,
+        (cr.revoked_at IS NULL AND cr.expires_at>clock_timestamp() AND d.last_seen_at>clock_timestamp()-interval '2 minutes'
+        AND EXISTS(SELECT 1 FROM app.checkpoint_sessions s JOIN app.checkpoints p ON p.organization_id=s.organization_id AND p.id=s.checkpoint_id WHERE s.organization_id=cr.organization_id AND s.id=d.session_id AND s.revoked_at IS NULL AND s.expires_at>clock_timestamp() AND p.active)) AS online,
+        d.last_seen_at IS NULL OR d.last_seen_at<clock_timestamp()-interval '2 minutes' AS stale,
+        (SELECT count(*)::int FROM app.checkpoint_sessions cs WHERE cs.credential_id=cr.id AND cs.organization_id=cr.organization_id AND cs.revoked_at IS NULL AND cs.expires_at>now()) active_sessions
+        FROM app.checkpoint_credentials cr
+        LEFT JOIN app.device_status d ON d.organization_id=cr.organization_id AND d.credential_id=cr.id
+        WHERE cr.organization_id=$1 AND cr.checkpoint_id=$2 ORDER BY cr.created_at DESC`,
+            [a.organization_id, id],
+          )
+        ).rows.map(withLink),
+      }),
+      a.organization_id,
+    );
   });
+
   app.post("/api/v1/access/:id/revoke", async (req) => {
     const a = await auth.authenticate(req),
       id = uuid.parse((req.params as { id: string }).id);
@@ -173,30 +245,43 @@ export function registerCapture(
     { config: { rateLimit: { max: 20, timeWindow: "15 minutes" } } },
     async (req, reply) => {
       const input = z
-        .object({
-          code: z
-            .string()
-            .trim()
-            .toUpperCase()
-            .regex(/^[A-F0-9]{8}$/),
-          password: z.string().min(1).max(128),
-        })
-        .strict()
+        .union([
+          z
+            .object({
+              code: z
+                .string()
+                .trim()
+                .toUpperCase()
+                .regex(/^[A-F0-9]{8}$/),
+              password: z.string().min(1).max(128),
+            })
+            .strict(),
+          z.object({ access_token: z.string().regex(/^[a-f0-9-]{36}\.[a-f0-9]{64}$/) }).strict(),
+        ])
         .parse(req.body);
+      const linkId = "access_token" in input ? uuid.parse(input.access_token.split(".")[0]) : null;
+      const loginKey = "code" in input ? input.code : linkId;
       const limited = (
         await pool.query(
           `INSERT INTO app.auth_limits(key,attempts,window_start) VALUES($1,1,now())
    ON CONFLICT(key) DO UPDATE SET attempts=CASE WHEN app.auth_limits.window_start<now()-interval '15 minutes' THEN 1 ELSE app.auth_limits.attempts+1 END,
    window_start=CASE WHEN app.auth_limits.window_start<now()-interval '15 minutes' THEN now() ELSE app.auth_limits.window_start END RETURNING attempts`,
-          [digest("field:" + input.code)],
+          [digest("field:" + loginKey)],
         )
       ).rows[0];
       if (limited.attempts > 10)
         throw new HttpError(429, "RATE_LIMITED", "Muitas tentativas. Aguarde 15 minutos");
       const credential = (
-        await pool.query("SELECT * FROM app.checkpoint_credentials WHERE code=$1", [input.code])
+        await pool.query(
+          "SELECT * FROM app.checkpoint_credentials WHERE " + (linkId ? "id" : "code") + "=$1",
+          [loginKey],
+        )
       ).rows[0];
-      if (!(await verifyPassword(input.password, credential?.password_hash ?? null)))
+      if (
+        !("access_token" in input
+          ? credential && equal(input.access_token, accessToken(credential))
+          : await verifyPassword(input.password, credential?.password_hash ?? null))
+      )
         throw new HttpError(401, "INVALID_CREDENTIAL", "Código ou senha inválidos");
       const raw = token();
       await transaction(
@@ -235,9 +320,7 @@ export function registerCapture(
             { event_id: cr.event_id, checkpoint_id: cr.checkpoint_id, device_id: cr.device_id },
             req.id,
           );
-          await c.query("DELETE FROM app.auth_limits WHERE key=$1", [
-            digest("field:" + input.code),
-          ]);
+          await c.query("DELETE FROM app.auth_limits WHERE key=$1", [digest("field:" + loginKey)]);
         },
         credential.organization_id,
       );

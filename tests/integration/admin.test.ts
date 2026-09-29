@@ -178,6 +178,81 @@ test("Sprint 01: identidade, isolamento, configuração e auditoria em PostgreSQ
         true,
       );
     });
+    await t.test(
+      "iniciar sem justificativa, pausar para editar e retomar preservando largada",
+      async () => {
+        const created = await request("POST", "/events", body);
+        const eid = created.json().id;
+        const path = "/events/" + eid;
+        const current = async () => (await request("GET", path)).json();
+        const operate = async (action: string) =>
+          request("POST", path + "/operations", {
+            action,
+            expected_version: (await current()).version,
+          });
+        assert.equal((await operate("start")).statusCode, 409);
+        const cp = await request("POST", path + "/checkpoints", {
+          name: "Largada",
+          kind: "start",
+          sequence: 1,
+          distance_m: 0,
+          active: true,
+        });
+        assert.equal(cp.statusCode, 201, cp.body);
+        assert.equal((await request("GET", path + "/preparation")).json().ready, false);
+        assert.equal((await operate("start")).statusCode, 409);
+        const access = await request("POST", "/checkpoints/" + cp.json().id + "/access", {
+          label: "Celular teste",
+          expires_at: new Date(Date.now() + 86400000).toISOString(),
+        });
+        assert.equal(access.statusCode, 201, access.body);
+        assert.equal((await request("GET", path + "/preparation")).json().ready, true);
+        assert.equal(
+          (
+            await request(
+              "POST",
+              path + "/operations",
+              { action: "start", expected_version: (await current()).version },
+              "b",
+            )
+          ).statusCode,
+          404,
+        );
+        let r = await operate("start");
+        assert.equal(r.statusCode, 200, r.body);
+        assert.equal(r.json().state, "running");
+        const gun = (await current()).gun_start_at;
+        assert.ok(gun);
+        assert.equal((await operate("start")).statusCode, 409);
+        assert.equal(
+          (await request("PATCH", path, { ...body, expected_version: (await current()).version }))
+            .statusCode,
+          409,
+        );
+        r = await operate("pause");
+        assert.equal(r.statusCode, 200, r.body);
+        assert.equal(r.json().paused_for_edit, true);
+        r = await request("PATCH", path, {
+          ...body,
+          name: "Evento editado na pausa",
+          expected_version: (await current()).version,
+        });
+        assert.equal(r.statusCode, 200, r.body);
+        r = await operate("resume");
+        assert.equal(r.statusCode, 200, r.body);
+        assert.equal(r.json().paused_for_edit, false);
+        assert.equal((await current()).gun_start_at, gun);
+        const windows = (
+          await admin.query(
+            "SELECT closed_at FROM app.capture_windows WHERE event_id=$1 ORDER BY opened_at",
+            [eid],
+          )
+        ).rows;
+        assert.equal(windows.length, 2);
+        assert.ok(windows[0].closed_at);
+        assert.equal(windows[1].closed_at, null);
+      },
+    );
     await t.test("RLS sem contexto, pool reutilizado e FK composta", async () => {
       assert.equal(
         (await pool.query("SELECT current_user AS name")).rows[0].name,

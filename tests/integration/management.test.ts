@@ -145,6 +145,7 @@ test("Sprint 04: revisão, exportação e conciliação", async (t) => {
       for (const suffix of [
         "/observations",
         "/observations.csv",
+        "/observations?view=consolidated",
         "/observations/" + obs.id,
         "/audit",
         "/reconciliation",

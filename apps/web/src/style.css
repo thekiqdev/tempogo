@@ -1780,7 +1780,8 @@ p {
   }
   .admin-mobile-nav {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
     position: fixed;
     bottom: 0;
     left: 0;
@@ -2872,20 +2873,20 @@ p {
 .platform-sheet button {
   min-height: 44px;
 }
-.setup-steps {
+.platform-workspace .setup-steps {
   list-style: none;
   display: flex;
   padding: 0;
   gap: 12px;
   margin: 20px 0;
 }
-.setup-steps li {
+.platform-workspace .setup-steps li {
   flex: 1;
   border-bottom: 3px solid #dce5e7;
   padding: 12px 0;
   color: #647882;
 }
-.setup-steps li[aria-current] {
+.platform-workspace .setup-steps li[aria-current] {
   border-color: #147c68;
   color: #126d5d;
   font-weight: 700;
@@ -3600,4 +3601,729 @@ p {
   .platform-settings input[type="file"] {
     max-width: 100%;
   }
+}
+
+.checkpoint > .checkpoint-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.access-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.access-create-form {
+  scroll-margin-top: 80px;
+}
+.checkpoint-access-panel {
+  max-width: 900px;
+  margin: 0 auto;
+}
+@media (max-width: 700px) {
+  .checkpoint > .checkpoint-actions {
+    width: 100%;
+    padding-left: 50px;
+  }
+  .admin-workspace .checkpoint .checkpoint-actions .secondary {
+    width: auto;
+    margin: 0;
+    flex: 1;
+  }
+  .access-list li {
+    flex-wrap: wrap;
+  }
+  .access-actions {
+    width: 100%;
+  }
+  .access-actions button {
+    flex: 1;
+  }
+}
+
+.access-toolbar,
+.access-list-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 24px 0 16px;
+  flex-wrap: wrap;
+}
+.access-toolbar h3,
+.access-toolbar p {
+  margin: 0 0 6px;
+}
+.checkpoint-access-panel .access-list {
+  display: grid;
+  gap: 12px;
+  padding: 0;
+}
+.checkpoint-access-panel .access-list li {
+  background: white;
+  border: 1px solid #dbe5e9;
+  border-radius: 14px;
+  padding: 20px;
+  align-items: flex-start;
+}
+.access-device-status {
+  display: grid;
+  gap: 7px;
+  margin-top: 12px;
+}
+.access-device-status .badge {
+  width: fit-content;
+}
+.access-device-status small,
+.access-operator {
+  color: #536977;
+}
+.passage-actions {
+  display: grid;
+  gap: 10px;
+  min-width: 180px;
+}
+.passage-evidence article {
+  padding: 12px 0;
+  border-bottom: 1px solid #dbe5e9;
+}
+.consolidation-count {
+  font-size: 13px;
+  color: #116656;
+}
+@media (max-width: 700px) {
+  .access-toolbar > .primary {
+    width: 100%;
+  }
+  .checkpoint-access-panel .access-list li {
+    padding: 16px;
+  }
+  .passage-actions {
+    width: 100%;
+  }
+}
+
+.setup-steps .setup-complete .step-marker {
+  background: #dff3eb;
+  color: #116656;
+  font-weight: 800;
+}
+.setup-steps .setup-complete em {
+  color: #116656;
+}
+.setup-steps .setup-pending .step-marker {
+  background: #fff3dc;
+  color: #885a11;
+}
+.setup-action {
+  display: block;
+  margin-top: 8px;
+  color: #116656;
+  font-size: 13px;
+}
+.event-start-button {
+  min-height: 52px;
+  font-size: 17px;
+}
+.event-pause-control {
+  padding: 20px;
+  border: 1px solid #dbe5e9;
+  border-radius: 12px;
+  margin: 20px 0;
+}
+.event-pause-control button {
+  margin: 4px;
+}
+
+.access-checkpoint-header {
+  scroll-margin-top: 20px;
+  border-color: #5ac8b6;
+  box-shadow: 0 4px 18px #12382e0a;
+}
+.access-checkpoint-picker {
+  flex: 1;
+  min-width: 0;
+}
+.access-checkpoint-picker label {
+  margin: 0;
+  gap: 5px;
+}
+.access-checkpoint-picker select {
+  width: 100%;
+  font-weight: 700;
+}
+.access-checkpoint-picker p {
+  margin-top: 6px;
+}
+.checkpoint-access-panel {
+  animation: access-reveal 220ms ease-out;
+}
+@keyframes access-reveal {
+  from {
+    opacity: 0.5;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .checkpoint-access-panel {
+    animation: none;
+  }
+}
+
+/* Checkpoint access workspace */
+.checkpoint-access-panel {
+  max-width: 1100px;
+  margin-inline: auto;
+}
+.checkpoint-access-panel > .text-button {
+  margin: 0 0 12px;
+  font-size: 13px;
+}
+.access-checkpoint-header {
+  border: 1px solid #cbdedb;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 5px 20px #133b3205;
+}
+.access-picker {
+  position: relative;
+}
+.access-picker summary {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 22px;
+  cursor: pointer;
+  list-style: none;
+  border-radius: 16px;
+}
+.access-picker summary::-webkit-details-marker {
+  display: none;
+}
+.access-picker summary:hover {
+  background: #f4faf8;
+}
+.access-picker summary:focus-visible {
+  outline: 3px solid #63cbb9;
+  outline-offset: 3px;
+}
+.access-picker .point-number {
+  flex: 0 0 44px;
+  height: 44px;
+  background: #e1f2ec;
+  color: #116656;
+  font-weight: 700;
+}
+.access-picker-title {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.access-picker-title small {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: #647d83;
+  font-weight: 700;
+}
+.access-picker-title strong {
+  font-size: 20px;
+  color: #19323d;
+  overflow-wrap: anywhere;
+}
+.access-picker-title > span {
+  font-size: 12px;
+  color: #607680;
+}
+.access-picker-hint {
+  margin-left: auto;
+  display: flex;
+  gap: 12px;
+  color: #116656;
+  font-size: 13px;
+  font-weight: 600;
+}
+.access-picker-options {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  padding: 8px;
+  background: #fff;
+  border: 1px solid #cfdfdd;
+  border-radius: 14px;
+  box-shadow: 0 18px 45px #102b3626;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.access-picker-options > p {
+  margin: 8px 12px 12px;
+  font-size: 12px;
+  color: #637782;
+}
+.access-picker-options button {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  width: 100%;
+  border: 0;
+  background: #fff;
+  padding: 12px;
+  border-radius: 10px;
+  color: #19323d;
+}
+.access-picker-options button:hover,
+.access-picker-options button[aria-pressed="true"] {
+  background: #edf7f3;
+}
+.access-picker-options button > span:nth-child(2) {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.access-picker-options small {
+  color: #627681;
+  font-size: 12px;
+  font-weight: 400;
+}
+.access-picker-check {
+  margin-left: auto;
+  color: #116656;
+}
+.checkpoint-access-panel .access-toolbar {
+  margin: 24px 0 10px;
+  gap: 12px;
+}
+.access-toolbar h2 {
+  font-size: 21px;
+  margin: 0 0 6px;
+  letter-spacing: -0.03em;
+}
+.access-toolbar p {
+  font-size: 13px;
+  color: #607680;
+}
+.access-count-divider {
+  padding-inline: 6px;
+  color: #b7c6c9;
+}
+.access-help {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid #dbe5e9;
+}
+.access-help p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #607680;
+}
+.access-help a {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: #116656;
+  text-decoration: none;
+  font-weight: 600;
+}
+.access-help a:hover {
+  text-decoration: underline;
+}
+.checkpoint-access-panel .access-list-heading {
+  margin: 20px 0 12px;
+}
+.access-list-heading h3 {
+  font-size: 14px;
+  margin: 0;
+}
+.access-list-heading .checkbox {
+  font-size: 12px;
+  color: #607680;
+}
+.checkpoint-access-panel .access-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 0;
+}
+.checkpoint-access-panel .access-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+  box-shadow: 0 2px 4px #102b3603;
+}
+.access-card-body {
+  width: 100%;
+  min-width: 0;
+}
+.access-card-identity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.access-card-identity > strong {
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+.access-card-identity .badge {
+  flex-shrink: 0;
+  font-size: 11px;
+}
+.access-device-icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 36px;
+  border-radius: 9px;
+  color: #116656;
+  background: #eef6f3;
+  font-size: 22px;
+  flex-shrink: 0;
+}
+.checkpoint-access-panel .access-operator {
+  font-size: 12px;
+  margin: 6px 0 18px;
+}
+.access-card-facts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  padding: 12px;
+  background: #f6f9fa;
+  border-radius: 10px;
+}
+.access-card-facts p {
+  margin: 0;
+  display: grid;
+  gap: 5px;
+}
+.access-card-facts small {
+  color: #607680;
+  font-size: 11px;
+}
+.access-card-facts b {
+  font-family: ui-monospace, monospace;
+  letter-spacing: 0.07em;
+}
+.access-card-facts strong {
+  font-size: 12px;
+  font-weight: 500;
+}
+.access-device-status small {
+  font-size: 11px;
+  line-height: 1.5;
+}
+.access-device-status .badge {
+  font-size: 11px;
+}
+.checkpoint-access-panel .access-actions {
+  width: 100%;
+  display: flex;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 14px;
+  border-top: 1px solid #edf1f3;
+}
+.access-actions button {
+  flex: 1;
+  font-size: 12px;
+  min-height: 42px;
+}
+.checkpoint-access-panel .access-revoke {
+  color: #a14949;
+  border-color: #eadada;
+}
+.checkpoint-access-panel .access-create-form {
+  max-width: none;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  padding: 22px;
+  margin: 20px 0;
+  border-top: 3px solid #218875;
+}
+.access-create-form > h3,
+.access-create-form > p {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+.access-create-form > label {
+  margin: 0;
+}
+.access-create-form > label:last-of-type {
+  grid-column: 1 / -1;
+}
+.access-form-intro {
+  font-size: 13px;
+}
+@media (max-width: 700px) {
+  .access-picker summary {
+    padding: 16px;
+    gap: 10px;
+  }
+  .access-picker-title strong {
+    font-size: 17px;
+  }
+  .access-picker-hint {
+    font-size: 12px;
+    gap: 5px;
+  }
+  .access-help {
+    flex-direction: column;
+    gap: 8px;
+  }
+  .checkpoint-access-panel .access-toolbar > .primary {
+    width: auto;
+    font-size: 12px;
+    padding-inline: 14px;
+  }
+  .access-toolbar h2 {
+    font-size: 19px;
+  }
+  .checkpoint-access-panel .access-list {
+    grid-template-columns: 1fr;
+  }
+  .checkpoint-access-panel .access-create-form {
+    grid-template-columns: 1fr;
+    padding: 16px;
+  }
+  .access-list-heading {
+    align-items: flex-start;
+    gap: 10px;
+  }
+}
+
+/* Event checklist is a vertical list, independent of registration steppers. */
+.event-overview {
+  width: 100%;
+  min-width: 0;
+}
+.event-overview .setup-steps {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+  margin: 16px 0 0;
+}
+.event-overview .setup-steps li {
+  min-width: 0;
+  padding: 0;
+  border-bottom: 0;
+  color: #203541;
+}
+.event-overview .setup-steps button {
+  align-items: flex-start;
+}
+.event-overview .setup-steps button > span:last-child {
+  align-self: center;
+  flex-shrink: 0;
+  color: #638078;
+}
+.event-overview .setup-steps button > span:nth-child(2) {
+  overflow-wrap: anywhere;
+}
+.event-overview .setup-steps button:hover {
+  background: #f5faf7;
+}
+.event-overview .setup-steps button:focus-visible {
+  outline: 3px solid #218875;
+  outline-offset: -3px;
+}
+.event-overview .next-step h2 {
+  margin-top: 0;
+  overflow-wrap: anywhere;
+}
+.event-overview .overview-communication {
+  gap: 12px;
+}
+@media (max-width: 700px) {
+  .event-overview .next-step {
+    padding: 20px;
+    margin-bottom: 24px;
+  }
+  .event-overview .next-step h2 {
+    font-size: 22px;
+    line-height: 1.3;
+  }
+  .event-overview .next-step button {
+    width: 100%;
+    white-space: normal;
+  }
+  .event-overview .next-step .secondary {
+    margin-top: 8px;
+  }
+  .event-overview .setup-steps button {
+    padding: 16px;
+    gap: 12px;
+  }
+  .event-overview .setup-steps small {
+    line-height: 1.5;
+  }
+  .event-overview .overview-title h2 {
+    font-size: 20px;
+  }
+}
+
+.access-copy {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.access-copy .secondary {
+  min-height: 36px;
+  padding: 5px 10px;
+  font-size: 11px;
+  width: fit-content;
+}
+.access-copy small {
+  font-size: 11px;
+  color: #116656;
+}
+.access-card-expanded {
+  border-color: #218875 !important;
+}
+.checkpoint-access-panel .access-list .access-create-form {
+  width: 100%;
+  margin: 0;
+  padding: 16px 0 0;
+  border: 0;
+  border-top: 1px solid #dbe5e9;
+  box-shadow: none;
+  border-radius: 0;
+  grid-template-columns: minmax(0, 1fr);
+}
+.access-list .issued-access {
+  width: 100%;
+  margin: 0;
+  padding: 16px;
+  box-sizing: border-box;
+}
+.issued-access p {
+  overflow-wrap: anywhere;
+}
+.issued-access .access-copy {
+  margin-left: 8px;
+}
+
+.access-login-link {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0;
+  min-width: 0;
+}
+.access-login-link label {
+  margin: 0;
+  font-size: 12px;
+}
+.access-login-link input {
+  width: 100%;
+  min-width: 0;
+  font-size: 12px;
+}
+.access-login-link > small {
+  color: #607680;
+  font-size: 11px;
+}
+
+.checkpoint-presence {
+  font-size: 12px;
+  white-space: nowrap;
+  color: #647882;
+  margin-left: auto;
+}
+.checkpoint-presence.is-online {
+  color: #147c68;
+}
+.checkpoint-access-panel .access-login-link {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid #edf1f3;
+}
+.access-login-link > strong {
+  font-size: 12px;
+}
+.access-login-link > small {
+  flex: 1;
+  min-width: 120px;
+  font-size: 11px;
+}
+.access-login-link .access-copy {
+  margin-left: auto;
+}
+.access-toolbar > div:first-child {
+  margin-right: auto;
+}
+.access-live {
+  padding: 18px;
+  border: 1px solid #b5d9cf;
+  border-radius: 12px;
+  background: #f4faf7;
+  margin-bottom: 18px;
+}
+.access-live h3 {
+  margin: 0 0 4px;
+}
+.access-live p,
+.access-live small {
+  color: #607680;
+  font-size: 12px;
+}
+.access-live ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  max-height: 360px;
+  overflow: auto;
+}
+.access-live li {
+  display: grid;
+  grid-template-columns: 70px minmax(0, 1fr) auto;
+  gap: 10px;
+  padding: 12px 0;
+  border-top: 1px solid #dce9e3;
+  font-size: 13px;
+}
+.access-live li span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.access-live li small {
+  display: block;
+  margin-top: 3px;
+}
+@media (max-width: 700px) {
+  .checkpoint-presence {
+    margin-left: 0;
+  }
+  .access-toolbar {
+    gap: 8px;
+  }
+  .access-toolbar > div:first-child {
+    flex-basis: 100%;
+  }
+}
+
+.access-status-badges {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+}
+.access-card-identity .access-presence-badge.is-online {
+  background: #d8f5e3;
+  color: #146c35;
+  border: 1px solid #9edbb4;
+  font-weight: 750;
 }

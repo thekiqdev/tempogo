@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import type pg from "pg";
 import { z } from "zod";
 import type { AuthOptions, authService } from "./auth.js";
+import { consolidatedView } from "./consolidation.js";
 import { audit, HttpError, transaction } from "./db.js";
 import type { FieldScope } from "./offline.js";
 
@@ -9,6 +10,7 @@ const uuid = z.string().uuid(),
   reason = z.string().trim().min(3).max(500);
 const filters = z
   .object({
+    view: z.enum(["records", "consolidated"]).default("records"),
     bib: z
       .string()
       .regex(/^[0-9]{1,8}$/)
@@ -24,7 +26,9 @@ const filters = z
   .refine((v) => !v.from || !v.to || Date.parse(v.from) <= Date.parse(v.to), "Período inválido");
 
 // Pending evidence is acknowledged explicitly by each immutable revision.
-export const effectiveView = `SELECT o.*,p.name checkpoint_name,
+export const effectiveView = `SELECT o.*,p.name checkpoint_name,cr.id credential_id,cr.label access_label,cr.operator_name,
+ (EXISTS(SELECT 1 FROM app.observation_flags f WHERE f.organization_id=o.organization_id AND f.observation_id=o.id AND f.reason!='possible_duplicate' AND NOT(f.reason=ANY(coalesce(r.reviewed_flags,ARRAY[]::text[]))))
+ OR EXISTS(SELECT 1 FROM app.review_requests q WHERE q.organization_id=o.organization_id AND q.observation_id=o.id AND NOT(q.id=ANY(coalesce(r.reviewed_requests,ARRAY[]::uuid[]))))) review_required,
  coalesce(r.version,0) version,
  (SELECT count(*) FROM app.observation_flags f WHERE f.organization_id=o.organization_id AND f.observation_id=o.id)::int + (SELECT count(*) FROM app.review_requests q WHERE q.organization_id=o.organization_id AND q.observation_id=o.id)::int evidence_version, coalesce(r.bib,o.bib) effective_bib,
  coalesce(r.captured_at,o.estimated_captured_at,o.raw_captured_at) effective_captured_at,
@@ -34,6 +38,8 @@ export const effectiveView = `SELECT o.*,p.name checkpoint_name,
  THEN 'pending' ELSE coalesce(r.disposition,'accepted') END status,
  EXISTS(SELECT 1 FROM app.observation_flags f WHERE f.organization_id=o.organization_id AND f.observation_id=o.id AND f.reason='possible_duplicate') possible_duplicate
  FROM app.observations o JOIN app.checkpoints p ON p.organization_id=o.organization_id AND p.id=o.checkpoint_id
+ JOIN app.checkpoint_sessions cs ON cs.organization_id=o.organization_id AND cs.id=o.session_id
+ JOIN app.checkpoint_credentials cr ON cr.organization_id=cs.organization_id AND cr.id=cs.credential_id
  LEFT JOIN LATERAL(SELECT * FROM app.observation_revisions r WHERE r.organization_id=o.organization_id AND r.observation_id=o.id ORDER BY version DESC LIMIT 1) r ON true`;
 
 export async function eventLock(c: pg.PoolClient, org: string, id: string, exclusive = false) {
@@ -84,7 +90,7 @@ export async function reconciliation(
   const pending = Number(
     (
       await c.query(
-        `SELECT count(*) FROM (${effectiveView}) v WHERE organization_id=$1 AND event_id=$2 AND status='pending'`,
+        `SELECT count(*) FROM (${consolidatedView(effectiveView)}) v WHERE status='pending'`,
         [org, e.id],
       )
     ).rows[0].count,
@@ -152,7 +158,7 @@ export function registerManagement(
       }
     }
     const where = conditions.join(" AND "),
-      source = `FROM (${effectiveView}) v WHERE ${where}`;
+      source = `FROM (${f.view === "consolidated" ? consolidatedView(effectiveView) : effectiveView}) v WHERE ${where}`;
     const summary = (
       await c.query(
         `SELECT count(*)::int total,count(*) FILTER(WHERE status='pending')::int pending,count(*) FILTER(WHERE status='invalidated')::int invalidated ${source}`,
@@ -163,7 +169,7 @@ export function registerManagement(
       throw new HttpError(422, "EXPORT_TOO_LARGE", "Filtre a exportação para até 50.000 passagens");
     const rows = (
       await c.query(
-        `SELECT id,bib,raw_captured_at,estimated_captured_at,received_at,source,checkpoint_id,checkpoint_name,version,effective_bib,effective_captured_at,disposition,status,possible_duplicate,status='pending' needs_review ${source} ORDER BY received_at DESC,id LIMIT $${values.length + 1} OFFSET $${values.length + 2}`,
+        `SELECT id,bib,raw_captured_at,estimated_captured_at,received_at,source,checkpoint_id,checkpoint_name,version,effective_bib,effective_captured_at,disposition,status,possible_duplicate,operator_name,access_label,credential_id,device_id,${f.view === "consolidated" ? "observation_count,members" : "1 observation_count, NULL::jsonb members"},status='pending' needs_review ${source} ORDER BY received_at DESC,id LIMIT $${values.length + 1} OFFSET $${values.length + 2}`,
         [...values, exporting ? 50000 : f.limit, exporting ? 0 : f.offset],
       )
     ).rows;
@@ -194,6 +200,10 @@ export function registerManagement(
           "received_at",
           "timezone",
           "source",
+          "operator_name",
+          "access_label",
+          "credential_id",
+          "observation_count",
           "status",
           "version",
         ];

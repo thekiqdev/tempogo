@@ -253,6 +253,7 @@ function Detail({
     [pointsError, setPointsError] = useState(""),
     [edit, setEdit] = useState(false),
     [cpEdit, setCpEdit] = useState<CP | "new" | null>(null),
+    [cpAccess, setCpAccess] = useState<CP | null>(null),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
   const choices: Record<string, string[]> = {
@@ -275,6 +276,24 @@ function Detail({
       setPointsLoading(false);
     });
   }, [race.id, race.version]);
+  useEffect(() => {
+    if (tab !== "checkpoints") return;
+    let active = true;
+    const timer = setInterval(() => {
+      api<{ items: CP[] }>("/events/" + race.id + "/checkpoints")
+        .then((result) => {
+          if (active) setPoints(result.items);
+        })
+        .catch(() => {
+          if (active)
+            setPoints((previous) => previous.map((p) => ({ ...p, online_devices: undefined })));
+        });
+    }, 15000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [race.id, tab]);
   async function change(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setBusy(true);
@@ -300,8 +319,27 @@ function Detail({
       setBusy(false);
     }
   }
+  async function operate(action: "start" | "pause" | "resume") {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api("/events/" + race.id + "/operations", "POST", {
+        action,
+        expected_version: race.version,
+      });
+      await onReload();
+      if (action !== "pause") setTab("summary");
+      window.scrollTo(0, 0);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
   function navigate(value: string) {
-    setTab(value);
+    setTab(value === "access" ? "checkpoints" : value);
+    setCpAccess(value === "access" ? (points[0] ?? null) : null);
     setError("");
     window.scrollTo(0, 0);
   }
@@ -380,18 +418,19 @@ function Detail({
             {race.location || "Local não informado"}
           </p>
         </div>
-        <span className={"badge " + race.state}>{states[race.state]}</span>
+        <span className={"badge " + race.state}>
+          {race.paused_for_edit ? "Pausado para edição" : states[race.state]}
+        </span>
       </div>
       <ErrorMessage text={error} />
       <nav className="tabs admin-desktop-tabs" aria-label="Detalhes do evento">
         {[
           ["summary", "Resumo"],
           ["checkpoints", "Checkpoints"],
-          ["settings", "Configuração"],
-          ["access", "Acessos"],
           ["observations", "Passagens"],
           ["recovery", "Recuperação"],
           ["audit", "Histórico"],
+          ["settings", "Configuração"],
         ].map(([v, n]) => (
           <button
             type="button"
@@ -406,6 +445,8 @@ function Detail({
       {tab === "summary" && (
         <EventOverview
           race={race}
+          busy={busy}
+          onOperate={operate}
           points={points}
           loading={pointsLoading}
           onNavigate={navigate}
@@ -421,9 +462,9 @@ function Detail({
           <p className="muted">Encontre as ferramentas da sua prova.</p>
           {[
             ["observations", "Passagens", "Consultar, revisar e exportar registros"],
-            ["settings", "Configuração", "Dados, início e encerramento da prova"],
             ["recovery", "Recuperação", "Aparelhos e recuperação de registros"],
             ["audit", "Histórico", "Quem alterou o quê na sua prova"],
+            ["settings", "Configuração", "Dados, início e encerramento da prova"],
           ].map(([value, label, help]) => (
             <button key={value} onClick={() => navigate(value ?? "summary")}>
               <span>
@@ -436,12 +477,19 @@ function Detail({
         </section>
       )}
       <nav className="admin-mobile-nav" aria-label="Navegação do evento">
-        {[
-          ["summary", "Resumo", "▦"],
-          ["checkpoints", "Percurso", "↗"],
-          ["access", "Equipe", "♧"],
-          ["more", "Mais", "•••"],
-        ].map(([value, label, icon]) => (
+        {(race.state === "running"
+          ? [
+              ["summary", "Resumo", "▦"],
+              ["checkpoints", "Percurso", "↗"],
+              ["observations", "Passagens", "≡"],
+            ]
+          : [
+              ["summary", "Resumo", "▦"],
+              ["checkpoints", "Percurso", "↗"],
+              ["access", "Equipe", "♧"],
+              ["more", "Mais", "•••"],
+            ]
+        ).map(([value, label, icon]) => (
           <button
             key={value}
             aria-current={
@@ -460,86 +508,88 @@ function Detail({
 
       {tab === "checkpoints" && (
         <>
-          <div className="section-title">
-            <h3>
-              Pontos do percurso <span className="count">{points.length}</span>
-            </h3>
-            {race.state === "draft" && (
-              <button className="primary" onClick={() => setCpEdit("new")}>
-                + Adicionar checkpoint
-              </button>
-            )}
-          </div>
-          <p className="section-intro">
-            Cada checkpoint é um ponto de registro. Organize os pontos na ordem em que os corredores
-            passam por eles.
-          </p>
-          {race.state !== "draft" && (
-            <p className="next-hint">
-              Percurso disponível para consulta. A edição é permitida enquanto a prova está em
-              rascunho.
-            </p>
-          )}
-          {pointsLoading ? (
-            <p role="status">Carregando percurso…</p>
-          ) : points.length === 0 ? (
-            <div className="empty">
-              <span className="empty-marker">01</span>
-              <h3>Defina o primeiro ponto da prova</h3>
-              <p>Adicione largada, pontos intermediários e chegada na ordem do percurso.</p>
-            </div>
+          {cpAccess ? (
+            <AccessPanel
+              eventId={race.id}
+              points={points}
+              initialPoint={cpAccess.id}
+              onBack={() => setCpAccess(null)}
+            />
           ) : (
-            <div className="checkpoint-list">
-              {points.map((p) => (
-                <article className="checkpoint" key={p.id}>
-                  <span className="point-number">{String(p.sequence).padStart(2, "0")}</span>
-                  <div>
-                    <h3>{p.name}</h3>
-                    <p>
-                      {kinds[p.kind]} ·{" "}
-                      {p.distance_m === null
-                        ? "Distância não informada"
-                        : p.distance_m / 1000 + " km"}{" "}
-                      · {p.active ? "Ativo" : "Inativo"}
-                    </p>
-                  </div>
-                  {race.state === "draft" && (
-                    <button className="secondary" onClick={() => setCpEdit(p)}>
-                      Editar
-                    </button>
-                  )}
-                </article>
-              ))}
-            </div>
+            <>
+              <div className="section-title">
+                <h3>
+                  Pontos do percurso <span className="count">{points.length}</span>
+                </h3>
+                {(race.state === "draft" || race.paused_for_edit) && (
+                  <button className="primary" onClick={() => setCpEdit("new")}>
+                    + Adicionar checkpoint
+                  </button>
+                )}
+              </div>
+              <p className="section-intro">
+                Cada checkpoint é um ponto de registro. Organize os pontos na ordem em que os
+                corredores passam por eles.
+              </p>
+              {race.state !== "draft" && !race.paused_for_edit && (
+                <p className="next-hint">
+                  Percurso disponível para consulta. A edição é permitida enquanto a prova está em
+                  rascunho.
+                </p>
+              )}
+              {pointsLoading ? (
+                <p role="status">Carregando percurso…</p>
+              ) : points.length === 0 ? (
+                <div className="empty">
+                  <span className="empty-marker">01</span>
+                  <h3>Defina o primeiro ponto da prova</h3>
+                  <p>Adicione largada, pontos intermediários e chegada na ordem do percurso.</p>
+                </div>
+              ) : (
+                <div className="checkpoint-list">
+                  {points.map((p) => (
+                    <article className="checkpoint" key={p.id}>
+                      <span className="point-number">{String(p.sequence).padStart(2, "0")}</span>
+                      <div>
+                        <h3>{p.name}</h3>
+                        <p>
+                          {kinds[p.kind]} ·{" "}
+                          {p.distance_m === null
+                            ? "Distância não informada"
+                            : p.distance_m / 1000 + " km"}{" "}
+                          · {p.active ? "Ativo" : "Inativo"}
+                        </p>
+                      </div>
+                      <span
+                        className={"checkpoint-presence " + (p.online_devices ? "is-online" : "")}
+                      >
+                        {p.online_devices == null
+                          ? "Presença indisponível"
+                          : p.online_devices + " online"}
+                      </span>
+                      <div className="checkpoint-actions">
+                        {(race.state === "draft" || race.paused_for_edit) && (
+                          <button className="secondary" onClick={() => setCpEdit(p)}>
+                            Editar
+                          </button>
+                        )}
+                        <button
+                          className="secondary"
+                          onClick={() => {
+                            setCpAccess(p);
+                          }}
+                        >
+                          Acessos
+                        </button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </>
           )}
-          <p className="footnote">
-            Depois do percurso, configure um acesso para cada aparelho da equipe.
-          </p>
-          <button className="secondary full" onClick={() => navigate("access")}>
-            Continuar para a equipe →
-          </button>
         </>
       )}
-      {tab === "access" &&
-        (pointsLoading ? (
-          <p role="status">Carregando equipe…</p>
-        ) : points.length ? (
-          <AccessPanel points={points} />
-        ) : (
-          <section className="empty">
-            <h2>Primeiro, crie um ponto do percurso</h2>
-            <p>O acesso de cada aparelho precisa estar ligado a um checkpoint.</p>
-            <button
-              className="primary"
-              onClick={() => {
-                setTab("checkpoints");
-                setCpEdit("new");
-              }}
-            >
-              + Adicionar checkpoint
-            </button>
-          </section>
-        ))}
       {tab === "observations" && <ObservationPanel eventId={race.id} points={points} />}
       {tab === "recovery" && <RecoveryPanel eventId={race.id} />}
       {tab === "settings" && (
@@ -557,7 +607,7 @@ function Detail({
             <section className="panel">
               <div className="section-title">
                 <h3>Dados e operação</h3>
-                {race.state === "draft" && (
+                {(race.state === "draft" || race.paused_for_edit) && (
                   <button className="secondary" onClick={() => setEdit(true)}>
                     Editar dados
                   </button>
@@ -587,7 +637,8 @@ function Detail({
                 </div>
               </dl>
               <p className="muted">
-                Os dados e o percurso podem ser editados enquanto a prova está em rascunho.
+                Os dados e o percurso podem ser editados em rascunho ou durante uma pausa para
+                edição.
               </p>
               {race.gun_start_at && (
                 <p>
@@ -599,62 +650,110 @@ function Detail({
                   }).format(new Date(race.gun_start_at))}
                 </p>
               )}
-              {(choices[race.state]?.length ?? 0) > 0 && (
-                <form key={race.state} className="transition" onSubmit={change}>
-                  <h3>Próxima ação da prova</h3>
-                  <p className="field-help">
-                    Preparar libera a conferência da operação. Iniciar habilita a coleta; encerrar
-                    interrompe novos registros. Finalize após revisar e conciliar.
-                  </p>
-                  <label>
-                    Próximo estado
-                    <select aria-label="Próximo estado" name="target_state">
-                      {choices[race.state]?.map((s) => (
-                        <option key={s} value={s}>
-                          {states[s]}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  {race.state === "ready" && (
-                    <label>
-                      Horário real da largada (fuso deste aparelho)
-                      <input
-                        type="datetime-local"
-                        name="gun_start_at"
-                        step="1"
-                        defaultValue={new Date(Date.now() - new Date().getTimezoneOffset() * 60000)
-                          .toISOString()
-                          .slice(0, 19)}
-                      />
-                    </label>
-                  )}
-                  <label>
-                    Motivo
-                    <textarea
-                      name="reason"
-                      required
-                      minLength={3}
-                      maxLength={500}
-                      placeholder="Descreva a alteração para o histórico"
-                    />
-                  </label>
-                  {race.state === "closed" && (
-                    <label>
-                      Exceção de conciliação (opcional; mínimo 10 caracteres)
-                      <textarea
-                        name="exception_reason"
-                        minLength={10}
-                        maxLength={500}
-                        placeholder="Justifique aparelhos não conciliados apenas ao finalizar"
-                      />
-                    </label>
-                  )}
-                  <button className="primary" disabled={busy}>
-                    {busy ? "Atualizando…" : "Confirmar alteração"}
+              {["draft", "ready"].includes(race.state) && (
+                <div className="next-hint">
+                  <p>Para começar, confira as tarefas e use o botão Iniciar evento no Resumo.</p>
+                  <button className="primary" onClick={() => navigate("summary")}>
+                    Ir para o início do evento
                   </button>
-                </form>
+                </div>
               )}
+              {race.state === "running" && (
+                <div className="event-pause-control">
+                  <h3>Precisa editar a prova?</h3>
+                  <p>
+                    Pause a coleta para alterar os dados ou o percurso. A largada original será
+                    preservada. Aparelhos offline podem ter registros pendentes, que serão
+                    sinalizados para revisão ao sincronizar.
+                  </p>
+                  <button
+                    className="secondary"
+                    disabled={busy}
+                    onClick={() => void operate("pause")}
+                  >
+                    Pausar para editar
+                  </button>
+                </div>
+              )}
+              {race.paused_for_edit && (
+                <div className="event-pause-control">
+                  <h3>Evento pausado para edição</h3>
+                  <p>
+                    Edite os dados ou o percurso e retome quando estiver pronto. O tempo da prova
+                    continua contando desde a largada original.
+                  </p>
+                  <button className="secondary" onClick={() => navigate("checkpoints")}>
+                    Editar percurso
+                  </button>
+                  <button
+                    className="primary"
+                    disabled={busy}
+                    onClick={() => void operate("resume")}
+                  >
+                    Retomar evento
+                  </button>
+                </div>
+              )}
+              {!race.paused_for_edit &&
+                !["draft", "ready"].includes(race.state) &&
+                (choices[race.state]?.length ?? 0) > 0 && (
+                  <form key={race.state} className="transition" onSubmit={change}>
+                    <h3>Próxima ação da prova</h3>
+                    <p className="field-help">
+                      Preparar libera a conferência da operação. Iniciar habilita a coleta; encerrar
+                      interrompe novos registros. Finalize após revisar e conciliar.
+                    </p>
+                    <label>
+                      Próximo estado
+                      <select aria-label="Próximo estado" name="target_state">
+                        {choices[race.state]?.map((s) => (
+                          <option key={s} value={s}>
+                            {states[s]}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    {race.state === "ready" && (
+                      <label>
+                        Horário real da largada (fuso deste aparelho)
+                        <input
+                          type="datetime-local"
+                          name="gun_start_at"
+                          step="1"
+                          defaultValue={new Date(
+                            Date.now() - new Date().getTimezoneOffset() * 60000,
+                          )
+                            .toISOString()
+                            .slice(0, 19)}
+                        />
+                      </label>
+                    )}
+                    <label>
+                      Motivo
+                      <textarea
+                        name="reason"
+                        required
+                        minLength={3}
+                        maxLength={500}
+                        placeholder="Descreva a alteração para o histórico"
+                      />
+                    </label>
+                    {race.state === "closed" && (
+                      <label>
+                        Exceção de conciliação (opcional; mínimo 10 caracteres)
+                        <textarea
+                          name="exception_reason"
+                          minLength={10}
+                          maxLength={500}
+                          placeholder="Justifique aparelhos não conciliados apenas ao finalizar"
+                        />
+                      </label>
+                    )}
+                    <button className="primary" disabled={busy}>
+                      {busy ? "Atualizando…" : "Confirmar alteração"}
+                    </button>
+                  </form>
+                )}
               <p className="footnote">
                 Finalizar exige resolver revisões e conciliar aparelhos ou justificar uma exceção.
                 Reabrir retorna à coleta fechada para nova conferência.
@@ -810,7 +909,9 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
                           {e.distance_m ? e.distance_m / 1000 + " km" : e.category_name}
                         </p>
                       </div>
-                      <span className={"badge " + e.state}>{states[e.state]}</span>
+                      <span className={"badge " + e.state}>
+                        {e.paused_for_edit ? "Pausado para edição" : states[e.state]}
+                      </span>
                       <span className="arrow">↗</span>
                     </button>
                   ))}

@@ -54,7 +54,7 @@ const transition = z
     exception_reason: z.string().trim().min(10).max(500).optional(),
   })
   .strict();
-type EventRow = { id: string; state: string; version: number };
+type EventRow = { id: string; state: string; version: number; paused_for_edit: boolean };
 type CP = z.infer<typeof cpInput> & { id: string; version: number };
 async function lock(c: pg.PoolClient, org: string, eventId: string) {
   const e = (
@@ -70,9 +70,13 @@ function version(actual: number, expected: number) {
   if (actual !== expected)
     throw new HttpError(409, "VERSION_CONFLICT", "Os dados mudaram. Atualize antes de salvar");
 }
-function draft(state: string) {
-  if (state !== "draft")
-    throw new HttpError(409, "EVENT_LOCKED", "Volte o evento para rascunho antes de editar");
+function draft(event: EventRow) {
+  if (event.state !== "draft" && !(event.state === "closed" && event.paused_for_edit))
+    throw new HttpError(
+      409,
+      "EVENT_LOCKED",
+      "Pause o evento para editar ou use um evento em rascunho",
+    );
 }
 async function validate(c: pg.PoolClient, org: string, eventId: string, candidate?: CP) {
   let rows = (
@@ -180,7 +184,7 @@ export function registerEvents(
       v = eventInput.extend({ expected_version }).parse(req.body);
     return scoped(p, async (c) => {
       const before = await lock(c, p.organization_id, eid);
-      draft(before.state);
+      draft(before);
       version(before.version, v.expected_version);
       await c.query(
         "UPDATE app.race_categories SET name=$1,distance_m=$2 WHERE organization_id=$3 AND event_id=$4",
@@ -211,7 +215,13 @@ export function registerEvents(
       return {
         items: (
           await c.query(
-            "SELECT * FROM app.checkpoints WHERE organization_id=$1 AND event_id=$2 ORDER BY sequence",
+            `SELECT p.*, (SELECT count(*)::int FROM app.checkpoint_credentials cr
+ JOIN app.device_status d ON d.organization_id=cr.organization_id AND d.credential_id=cr.id
+ JOIN app.checkpoint_sessions s ON s.organization_id=cr.organization_id AND s.id=d.session_id
+ WHERE cr.organization_id=p.organization_id AND cr.checkpoint_id=p.id AND p.active
+ AND cr.revoked_at IS NULL AND cr.expires_at>clock_timestamp() AND s.revoked_at IS NULL AND s.expires_at>clock_timestamp()
+ AND d.last_seen_at>clock_timestamp()-interval '2 minutes') online_devices
+ FROM app.checkpoints p WHERE p.organization_id=$1 AND p.event_id=$2 ORDER BY p.sequence`,
             [p.organization_id, eid],
           )
         ).rows,
@@ -223,7 +233,7 @@ export function registerEvents(
       eid = id.parse((req.params as { id: string }).id),
       v = cpInput.parse(req.body);
     const result = await scoped(p, async (c) => {
-      draft((await lock(c, p.organization_id, eid)).state);
+      draft(await lock(c, p.organization_id, eid));
       await validate(c, p.organization_id, eid, { ...v, id: "new", version: 0 });
       const cp = (
         await c.query(
@@ -261,7 +271,7 @@ export function registerEvents(
         )
       ).rows[0];
       if (!ref) throw new HttpError(404, "NOT_FOUND", "Checkpoint não encontrado");
-      draft((await lock(c, p.organization_id, ref.event_id)).state);
+      draft(await lock(c, p.organization_id, ref.event_id));
       const before = (
         await c.query<CP>(
           "SELECT * FROM app.checkpoints WHERE organization_id=$1 AND id=$2 FOR UPDATE",
@@ -293,6 +303,102 @@ export function registerEvents(
         req.id,
       );
       return result.rows[0];
+    });
+  });
+  async function preparation(c: pg.PoolClient, org: string, event: string) {
+    const points = (
+      await c.query(
+        `SELECT p.id,p.name,EXISTS(SELECT 1 FROM app.checkpoint_credentials cr WHERE cr.organization_id=p.organization_id AND cr.checkpoint_id=p.id AND cr.revoked_at IS NULL AND cr.expires_at>clock_timestamp()) has_access FROM app.checkpoints p WHERE p.organization_id=$1 AND p.event_id=$2 AND p.active ORDER BY p.sequence`,
+        [org, event],
+      )
+    ).rows;
+    return {
+      active_checkpoints: points.length,
+      missing_access: points.filter((p) => !p.has_access).map((p) => ({ id: p.id, name: p.name })),
+      ready: points.length > 0 && points.every((p) => p.has_access),
+    };
+  }
+  app.get("/api/v1/events/:id/preparation", async (req) => {
+    const p = await auth.authenticate(req),
+      eid = id.parse((req.params as { id: string }).id);
+    return scoped(p, async (c) => {
+      await lock(c, p.organization_id, eid);
+      return preparation(c, p.organization_id, eid);
+    });
+  });
+  app.post("/api/v1/events/:id/operations", async (req) => {
+    const p = await auth.authenticate(req),
+      eid = id.parse((req.params as { id: string }).id);
+    const v = z
+      .object({ action: z.enum(["start", "pause", "resume"]), expected_version })
+      .strict()
+      .parse(req.body);
+    return scoped(p, async (c) => {
+      const e = await lock(c, p.organization_id, eid);
+      version(e.version, v.expected_version);
+      const valid =
+        v.action === "start"
+          ? ["draft", "ready"].includes(e.state)
+          : v.action === "pause"
+            ? e.state === "running"
+            : e.state === "closed" && e.paused_for_edit;
+      if (!valid)
+        throw new HttpError(
+          409,
+          "INVALID_TRANSITION",
+          "A situação do evento mudou. Atualize antes de continuar.",
+        );
+      const reason = {
+        start: "Evento iniciado pelo organizador",
+        pause: "Pausa para edição solicitada pelo organizador",
+        resume: "Coleta retomada após edição",
+      }[v.action];
+      if (v.action === "pause") {
+        await c.query(
+          "UPDATE app.capture_windows SET closed_at=GREATEST(clock_timestamp(),opened_at) WHERE organization_id=$1 AND event_id=$2 AND closed_at IS NULL",
+          [p.organization_id, eid],
+        );
+      } else {
+        if (!(await validate(c, p.organization_id, eid)).length)
+          throw new HttpError(409, "NO_CHECKPOINT", "Cadastre ao menos um checkpoint ativo.");
+        const check = await preparation(c, p.organization_id, eid);
+        if (!check.ready)
+          throw new HttpError(
+            409,
+            "ACCESS_REQUIRED",
+            "Crie um acesso válido para cada checkpoint ativo antes de iniciar ou retomar.",
+          );
+        if (v.action === "start")
+          await c.query(
+            "UPDATE app.race_categories SET gun_start_at=clock_timestamp() WHERE organization_id=$1 AND event_id=$2",
+            [p.organization_id, eid],
+          );
+        await c.query(
+          "INSERT INTO app.capture_windows(organization_id,event_id,opened_at,reason) VALUES($1,$2,CASE WHEN $4 THEN (SELECT gun_start_at FROM app.race_categories WHERE organization_id=$1 AND event_id=$2) ELSE clock_timestamp() END,$3)",
+          [p.organization_id, eid, reason, v.action === "start"],
+        );
+      }
+      const result = (
+        await c.query(
+          "UPDATE app.events SET state=$1,paused_for_edit=$2,version=version+1 WHERE organization_id=$3 AND id=$4 RETURNING state,paused_for_edit,version",
+          [
+            v.action === "pause" ? "closed" : "running",
+            v.action === "pause",
+            p.organization_id,
+            eid,
+          ],
+        )
+      ).rows[0];
+      await audit(
+        c,
+        p.organization_id,
+        p.user_id,
+        "event." + v.action,
+        eid,
+        { from: e.state, to: result.state, reason, paused_for_edit: result.paused_for_edit },
+        req.id,
+      );
+      return result;
     });
   });
   app.post("/api/v1/events/:id/transitions", async (req) => {
@@ -382,7 +488,7 @@ export function registerEvents(
           [p.organization_id, eid],
         );
       const result = await c.query(
-        "UPDATE app.events SET state=$1,version=version+1 WHERE organization_id=$2 AND id=$3 RETURNING state,version",
+        "UPDATE app.events SET state=$1,paused_for_edit=false,version=version+1 WHERE organization_id=$2 AND id=$3 RETURNING state,version",
         [v.target_state, p.organization_id, eid],
       );
       await audit(

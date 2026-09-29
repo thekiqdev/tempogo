@@ -115,6 +115,63 @@ test("Sprint 02: captura manual, credenciais e concorrência", async (t) => {
       assert.notEqual(one.id, two.id);
     });
     await t.test(
+      "link assinado: login, adulteração, validade, revogação e redefinição",
+      async () => {
+        const issueLink = async () =>
+          (
+            await admin("POST", "/checkpoints/" + cp + "/access", {
+              label: "Link test",
+              expires_at: new Date(Date.now() + 3600000).toISOString(),
+            })
+          ).json();
+        const enter = (access_url: string) =>
+          app.inject({
+            method: "POST",
+            url: "/api/v1/field/login",
+            headers: { origin },
+            payload: {
+              access_token: new URLSearchParams(new URL(access_url).hash.slice(1)).get("access"),
+            },
+          });
+        const a = await issueLink();
+        assert.ok(a.access_url.startsWith(origin + "/checkpoint#access="));
+        assert.equal(a.password_hash, undefined);
+        const listing = (await admin("GET", "/checkpoints/" + cp + "/access"))
+          .json()
+          .items.find((i: { id: string }) => i.id === a.id);
+        assert.equal(listing.access_url, a.access_url);
+        assert.equal(listing.password_hash, undefined);
+        const logged = await enter(a.access_url);
+        assert.equal(logged.statusCode, 200, logged.body);
+        const cookie = String(logged.headers["set-cookie"]).split(";")[0];
+        const me = await app.inject({ url: "/api/v1/field/me", headers: { cookie } });
+        assert.equal(me.json().checkpoint_id, cp);
+        const tampered = a.access_url.slice(0, -1) + (a.access_url.endsWith("a") ? "b" : "a");
+        assert.equal((await enter(tampered)).statusCode, 401);
+        await admin("POST", "/access/" + a.id + "/revoke", {});
+        assert.equal((await enter(a.access_url)).statusCode, 401);
+        assert.equal(
+          (await app.inject({ url: "/api/v1/field/me", headers: { cookie } })).statusCode,
+          401,
+        );
+        const b = await issueLink();
+        await db.query(
+          "UPDATE app.checkpoint_credentials SET expires_at=now()-interval '1 second' WHERE id=$1",
+          [b.id],
+        );
+        assert.equal((await enter(b.access_url)).statusCode, 401);
+        const c = await issueLink();
+        const replacement = await admin("POST", "/checkpoints/" + cp + "/access", {
+          label: "Link renewed",
+          replace_access_id: c.id,
+          expires_at: new Date(Date.now() + 3600000).toISOString(),
+        });
+        assert.equal(replacement.statusCode, 201, replacement.body);
+        assert.equal((await enter(c.access_url)).statusCode, 401);
+        assert.equal((await enter(replacement.json().access_url)).statusCode, 200);
+      },
+    );
+    await t.test(
       "contrato executável, entradas inválidas, sem IA e sem escolha de checkpoint",
       async () => {
         const spec = (await app.inject("/api/v1/capture/openapi.json")).json();
@@ -279,6 +336,104 @@ test("Sprint 02: captura manual, credenciais e concorrência", async (t) => {
         assert.equal((await field(one, "POST", "/observations", probe)).statusCode, 201);
       },
     );
+    await t.test(
+      "operadores independentes e consolidação por primeira captura, antes de paginar",
+      async () => {
+        const issue = async (operator_name: string, label: string) => {
+          const r = await admin("POST", "/checkpoints/" + cp + "/access", {
+            operator_name,
+            label,
+            expires_at: new Date(Date.now() + 3600000).toISOString(),
+          });
+          assert.equal(r.statusCode, 201, r.body);
+          return r.json();
+        };
+        const ana = await issue("Ana", "Celular 01"),
+          bruno = await issue("Bruno", "Celular 02");
+        const a = await login(ana.code, ana.password),
+          b = await login(bruno.code, bruno.password);
+        await field(a, "POST", "/heartbeat", { pending: 2, sending: 0, synced: 0, blocked: 0 });
+        const listing = await admin("GET", "/checkpoints/" + cp + "/access");
+        assert.equal(listing.json().items.find((i: { id: string }) => i.id === ana.id).pending, 2);
+        assert.equal(
+          listing.json().items.find((i: { id: string }) => i.id === bruno.id).pending,
+          null,
+        );
+        assert.equal(
+          listing.json().items.find((i: { id: string }) => i.id === ana.id).online,
+          true,
+        );
+        const onlineCount = async () =>
+          (await admin("GET", "/events/" + event + "/checkpoints"))
+            .json()
+            .items.find((i: { id: string }) => i.id === cp).online_devices;
+        assert.equal(await onlineCount(), 1);
+        await db.query(
+          "UPDATE app.device_status SET last_seen_at=now()-interval '3 minutes' WHERE credential_id=$1",
+          [ana.id],
+        );
+        assert.equal(await onlineCount(), 0);
+        assert.equal(
+          (await admin("GET", "/checkpoints/" + cp + "/access"))
+            .json()
+            .items.find((i: { id: string }) => i.id === ana.id).online,
+          false,
+        );
+        await field(a, "POST", "/heartbeat", { pending: 2, sending: 0, synced: 0, blocked: 0 });
+        const time = Date.now() - 30000;
+        const capture = async (who: Identity, delta: number) => {
+          const r = await field(who, "POST", "/observations", {
+            client_event_id: randomUUID(),
+            bib: "00888",
+            raw_captured_at: new Date(time + delta).toISOString(),
+          });
+          assert.equal(r.statusCode, 201, r.body);
+          return r.json();
+        };
+        const later = await capture(b, 4000),
+          first = await capture(a, 0);
+        await capture(b, 8000);
+        const path = "/events/" + event + "/observations";
+        const consolidated = await admin("GET", path + "?view=consolidated&bib=00888&limit=1");
+        assert.equal(consolidated.statusCode, 200, consolidated.body);
+        assert.equal(consolidated.json().total, 2);
+        const all = (await admin("GET", path + "?view=consolidated&bib=00888")).json().items;
+        const group = all.find((i: { id: string }) => i.id === first.id);
+        assert.equal(group.operator_name, "Ana");
+        assert.equal(group.observation_count, 2);
+        assert.equal(group.status, "accepted");
+        assert.equal(group.members[1].operator_name, "Bruno");
+        assert.equal((await admin("GET", path + "?bib=00888")).json().total, 3);
+        const csv = await admin("GET", path + ".csv?view=consolidated&bib=00888");
+        assert.equal(csv.statusCode, 200, csv.body);
+        assert.ok(csv.body.includes('"Ana"'));
+        await db.query(
+          "INSERT INTO app.observation_flags(organization_id,observation_id,reason) VALUES($1,$2,'time_uncertain')",
+          [org, later.id],
+        );
+        assert.equal(
+          (await admin("GET", path + "?view=consolidated&bib=00888&status=pending")).json().total,
+          1,
+        );
+        const detail = (await admin("GET", path + "/" + first.id)).json().observation;
+        const revision = await admin("POST", path + "/" + first.id + "/revisions", {
+          request_id: randomUUID(),
+          expected_version: detail.version,
+          expected_evidence: detail.evidence_version,
+          bib: detail.effective_bib,
+          captured_at: detail.effective_captured_at,
+          disposition: "invalidated",
+          reason: "Registro anterior incorreto",
+        });
+        assert.equal(revision.statusCode, 200, revision.body);
+        const updated = (await admin("GET", path + "?view=consolidated&bib=00888")).json().items;
+        assert.equal(updated.find((i: { id: string }) => i.id === later.id).observation_count, 2);
+        assert.equal(updated.find((i: { id: string }) => i.id === first.id).status, "invalidated");
+        await admin("POST", "/access/" + ana.id + "/revoke", {});
+        assert.equal((await field(b, "GET", "/me")).statusCode, 200);
+        assert.equal((await field(a, "GET", "/me")).statusCode, 401);
+      },
+    );
     await t.test("encerramento bloqueia intenção nova, preserva replay já confirmado", async () => {
       await db.query("UPDATE app.events SET state='closed' WHERE id=$1", [event]);
       assert.equal(
@@ -309,6 +464,52 @@ test("Sprint 02: captura manual, credenciais e concorrência", async (t) => {
       });
       assert.equal(r.statusCode, 401);
     });
+    await t.test(
+      "redefinição atômica revoga senha e sessões anteriores sem permitir repetição",
+      async () => {
+        const create = await admin("POST", "/checkpoints/" + cp + "/access", {
+          label: "Replacement test",
+          expires_at: new Date(Date.now() + 3600000).toISOString(),
+        });
+        assert.equal(create.statusCode, 201, create.body);
+        const previous = create.json();
+        const device = await login(previous.code, previous.password);
+        const invalid = await admin("POST", "/checkpoints/" + cp + "/access", {
+          label: "Replacement test",
+          replace_access_id: previous.id,
+          expires_at: new Date(Date.now() - 3600000).toISOString(),
+        });
+        assert.equal(invalid.statusCode, 422);
+        assert.equal((await field(device, "GET", "/me")).statusCode, 200);
+        const body = {
+          label: "Replacement test",
+          replace_access_id: previous.id,
+          expires_at: new Date(Date.now() + 3600000).toISOString(),
+        };
+        const replacement = await admin("POST", "/checkpoints/" + cp + "/access", body);
+        assert.equal(replacement.statusCode, 201, replacement.body);
+        assert.notEqual(replacement.json().code, previous.code);
+        assert.equal((await field(device, "GET", "/me")).statusCode, 401);
+        const oldLogin = await app.inject({
+          method: "POST",
+          url: "/api/v1/field/login",
+          headers: { origin },
+          payload: { code: previous.code, password: previous.password },
+        });
+        assert.equal(oldLogin.statusCode, 401);
+        await login(replacement.json().code, replacement.json().password);
+        assert.equal((await admin("POST", "/checkpoints/" + cp + "/access", body)).statusCode, 409);
+        assert.equal(
+          (
+            await admin("POST", "/checkpoints/" + cp + "/access", {
+              ...body,
+              replace_access_id: randomUUID(),
+            })
+          ).statusCode,
+          409,
+        );
+      },
+    );
     await t.test("limite persistente de tentativas por código", async () => {
       const code = "AB" + randomUUID().replaceAll("-", "").slice(0, 6).toUpperCase();
       await db.query("INSERT INTO app.auth_limits(key,attempts,window_start) VALUES($1,10,now())", [

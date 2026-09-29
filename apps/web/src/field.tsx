@@ -40,7 +40,17 @@ export function FieldApp() {
     [password, setPassword] = useState(""),
     [showPassword, setShowPassword] = useState(false),
     [busy, setBusy] = useState(false);
+  const linkLogin = useRef<Promise<void> | null>(null);
   useEffect(() => {
+    const accessToken = new URLSearchParams(location.hash.slice(1)).get("access");
+    if (accessToken || linkLogin.current) {
+      if (!linkLogin.current) {
+        history.replaceState(null, "", location.pathname + location.search);
+        linkLogin.current = authenticate({ access_token: accessToken });
+      }
+      void linkLogin.current.finally(() => setLoading(false));
+      return;
+    }
     (async () => {
       const p = await readPreparation().catch(() => null);
       try {
@@ -64,10 +74,15 @@ export function FieldApp() {
   }, []);
   async function login(e: FormEvent) {
     e.preventDefault();
+    await authenticate({ code, password });
+  }
+  async function authenticate(
+    credentials: { code: string; password: string } | { access_token: string | null },
+  ) {
     setBusy(true);
     setError("");
     try {
-      await request("/login", "", { code, password });
+      await request("/login", "", credentials);
       setPassword("");
       const s = await request<FieldSession>("/me");
       const p = await readPreparation();

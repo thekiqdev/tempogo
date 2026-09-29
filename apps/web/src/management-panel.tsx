@@ -13,6 +13,17 @@ type Observation = {
   status: string;
   version: number;
   evidence_version: number;
+  operator_name?: string;
+  access_label?: string;
+  observation_count?: number;
+  members?: {
+    id: string;
+    operator_name: string;
+    access_label: string;
+    effective_captured_at: string;
+    received_at: string;
+    status: string;
+  }[];
   disposition: string;
 };
 type Result = {
@@ -55,12 +66,19 @@ const stamp = (s: string) => new Date(s).toLocaleString("pt-BR");
 const local = (s: string) =>
   new Date(Date.parse(s) - new Date(s).getTimezoneOffset() * 60000).toISOString().slice(0, 23);
 export function ObservationPanel({ eventId, points }: { eventId: string; points: Checkpoint[] }) {
-  const [query, setQuery] = useState(""),
+  const [query, setQuery] = useState("view=consolidated"),
     [offset, setOffset] = useState(0),
     [data, setData] = useState<Result | null>(null),
     [detail, setDetail] = useState<Detail | null>(null),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
+  const reviewPanel = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (detail) {
+      reviewPanel.current?.scrollIntoView({ block: "start", behavior: "smooth" });
+      reviewPanel.current?.focus({ preventScroll: true });
+    }
+  }, [detail?.observation.id]);
   const attempt = useRef<{ key: string; id: string } | null>(null);
   const path = "/events/" + eventId + "/observations";
   async function refresh() {
@@ -87,7 +105,7 @@ export function ObservationPanel({ eventId, points }: { eventId: string; points:
     e.preventDefault();
     const f = new FormData(e.currentTarget),
       q = new URLSearchParams();
-    for (const key of ["bib", "checkpoint_id", "status", "from", "to"]) {
+    for (const key of ["view", "bib", "checkpoint_id", "status", "from", "to"]) {
       const value = String(f.get(key) ?? "");
       if (value) q.set(key, ["from", "to"].includes(key) ? new Date(value).toISOString() : value);
     }
@@ -159,7 +177,19 @@ export function ObservationPanel({ eventId, points }: { eventId: string; points:
           Atualizar passagens
         </button>
       </div>
+      <p className="next-hint">
+        A visão consolidada considera a primeira captura de cada grupo de até 5 segundos para o
+        mesmo número e checkpoint. Registros originais são preservados. Horários com sinalizações
+        continuam sujeitos à revisão.
+      </p>
       <form className="review-filters panel" onSubmit={filter}>
+        <label>
+          Visualização
+          <select name="view" defaultValue="consolidated">
+            <option value="consolidated">Passagens consolidadas</option>
+            <option value="records">Todos os registros originais</option>
+          </select>
+        </label>
         <label>
           Número
           <input name="bib" inputMode="numeric" pattern="[0-9]{1,8}" maxLength={8} />
@@ -221,15 +251,44 @@ export function ObservationPanel({ eventId, points }: { eventId: string; points:
             <div>
               <b>{i.checkpoint_name}</b>
               <small>
+                Origem: {i.operator_name ? i.operator_name + " · " : ""}
+                {i.access_label || "Aparelho não informado"}
+              </small>
+              {(i.observation_count ?? 1) > 1 && (
+                <strong className="consolidation-count">
+                  Primeira captura · {i.observation_count} registros agrupados
+                </strong>
+              )}
+              <small>
                 Captura: {stamp(i.effective_captured_at)} · Recebimento: {stamp(i.received_at)}
               </small>
               <span>
                 {statusLabel[i.status]} · versão {i.version}
               </span>
             </div>
-            <button className="secondary" onClick={() => open(i.id)}>
-              Revisar {i.effective_bib}
-            </button>
+            <div className="passage-actions">
+              <button className="secondary" onClick={() => open(i.id)}>
+                Revisar {i.effective_bib}
+              </button>
+              {(i.members?.length ?? 0) > 1 && (
+                <details className="passage-evidence">
+                  <summary>Ver registros do grupo</summary>
+                  {i.members!.map((m, index) => (
+                    <article key={m.id}>
+                      <strong>{index === 0 ? "Primeira captura" : "Registro adicional"}</strong>
+                      <p>
+                        {m.operator_name ? m.operator_name + " · " : ""}
+                        {m.access_label}
+                      </p>
+                      <p>{stamp(m.effective_captured_at)}</p>
+                      <button className="secondary" onClick={() => open(m.id)}>
+                        Revisar este registro
+                      </button>
+                    </article>
+                  ))}
+                </details>
+              )}
+            </div>
           </li>
         ))}
       </ul>
@@ -247,13 +306,22 @@ export function ObservationPanel({ eventId, points }: { eventId: string; points:
         </button>
       </div>
       {detail && (
-        <section className="panel" aria-label="Revisão da passagem">
+        <section ref={reviewPanel} tabIndex={-1} className="panel" aria-label="Revisão da passagem">
           <div className="section-title">
             <h3>Revisão da passagem {detail.observation.effective_bib}</h3>
             <button className="secondary" onClick={() => setDetail(null)}>
               Fechar revisão
             </button>
           </div>
+          <p>
+            Origem:{" "}
+            {detail.observation.operator_name ? detail.observation.operator_name + " · " : ""}
+            {detail.observation.access_label}
+          </p>
+          <p className="field-help">
+            Invalidar a primeira captura faz a próxima válida assumir o grupo. Corrigir número ou
+            horário recalcula o agrupamento.
+          </p>
           <p>
             Original: {detail.observation.bib} · {stamp(detail.observation.raw_captured_at)}.
             Vigente: {detail.observation.effective_bib} ·{" "}

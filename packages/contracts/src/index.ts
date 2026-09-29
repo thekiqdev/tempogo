@@ -20,8 +20,10 @@ export type RaceEvent = {
   category_name: string;
   distance_m: number | null;
   gun_start_at: string | null;
+  paused_for_edit?: boolean;
 };
 export type Checkpoint = {
+  online_devices?: number;
   id: string;
   name: string;
   kind: string;
