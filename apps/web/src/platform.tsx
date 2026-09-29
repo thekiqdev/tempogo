@@ -1,6 +1,7 @@
 import { type FormEvent, useEffect, useState } from "react";
 import { EmailChange } from "./platform-accounts";
 import { InvitationAccept } from "./platform-organizations";
+import { PlatformLogo, useMfaRequired } from "./platform-settings";
 import { PlatformWorkspace } from "./platform-workspace";
 
 type Result = {
@@ -32,6 +33,7 @@ export function PlatformApp() {
   );
 }
 function PlatformAuth() {
+  const mfaRequired = useMfaRequired();
   const [mode, setMode] = useState(initialMode),
     [csrf, setCsrf] = useState(""),
     [email, setEmail] = useState(""),
@@ -45,6 +47,19 @@ function PlatformAuth() {
     [notice, setNotice] = useState(""),
     [busy, setBusy] = useState(false),
     [loading, setLoading] = useState(initialMode === "login");
+  useEffect(() => {
+    const renew = () => {
+      setUser("");
+      setCsrf("");
+      setMode("login");
+      setCodes([]);
+      setPassword("");
+      setCode("");
+      setNotice("Authenticator ativado. Entre novamente para verificar seu acesso.");
+    };
+    window.addEventListener("platform:session-required", renew);
+    return () => window.removeEventListener("platform:session-required", renew);
+  }, []);
   async function request(path: string, body?: unknown, token = csrf): Promise<Result> {
     const res = await fetch("/api/v1/platform/auth" + path, {
       method: body === undefined ? "GET" : "POST",
@@ -80,6 +95,7 @@ function PlatformAuth() {
           if (res.ok) {
             const d = await res.json();
             if (active) {
+              window.dispatchEvent(new Event("platform:settings"));
               setUser(d.user.email);
               setCsrf(d.csrf_token);
               setMode("home");
@@ -108,6 +124,7 @@ function PlatformAuth() {
     setError("");
     if (d.csrf_token) setCsrf(d.csrf_token);
     if (d.user) {
+      window.dispatchEvent(new Event("platform:settings"));
       setUser(d.user.email);
       setSecret("");
       setCodes(d.recovery_codes ?? []);
@@ -136,7 +153,7 @@ function PlatformAuth() {
         setPassword("");
         setConfirm("");
         setMode("login");
-        setNotice("Senha definida. Entre para continuar com o autenticador.");
+        setNotice("Senha definida. Entre para continuar.");
       } else if (mode === "mfa-reset")
         await proceed(await request("/mfa/reset/accept", { token: initialToken, password }));
       else if (mode === "mfa_enroll") await proceed(await request("/mfa/confirm", { code }));
@@ -144,7 +161,7 @@ function PlatformAuth() {
       else if (mode === "recovery")
         await proceed(await request("/mfa/recovery", { recovery_code: code.trim().toLowerCase() }));
       else if (mode === "reauth") {
-        await request("/reauthenticate", { password, code });
+        await request("/reauthenticate", { password, ...(mfaRequired ? { code } : {}) });
         setPassword("");
         setCode("");
         setMode("home");
@@ -188,7 +205,9 @@ function PlatformAuth() {
   return (
     <div className={user && codes.length === 0 ? "platform-authenticated" : "platform-shell"}>
       <header hidden={!!user && codes.length === 0}>
-        <a href="/">TempoGo</a>
+        <a href="/">
+          <PlatformLogo />
+        </a>
         <span>Administração da plataforma</span>
       </header>
       <section className="platform-card" hidden={mode === "home" && codes.length === 0}>
@@ -324,7 +343,8 @@ function PlatformAuth() {
                   />
                 </label>
               )}
-              {["mfa_enroll", "mfa_verify", "reauth", "recovery"].includes(mode) && (
+              {(["mfa_enroll", "mfa_verify", "recovery"].includes(mode) ||
+                (mode === "reauth" && mfaRequired)) && (
                 <label>
                   {mode === "recovery" ? "Código de recuperação" : "Código do autenticador"}
                   <input

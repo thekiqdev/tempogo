@@ -41,7 +41,6 @@ export function OrganizationMembers({
     [email, setEmail] = useState(""),
     [password, setPassword] = useState(""),
     [confirm, setConfirm] = useState(""),
-    [mode, setMode] = useState("create"),
     [show, setShow] = useState(false);
   const [emailTarget, setEmailTarget] = useState<Member | null>(null),
     [newEmail, setNewEmail] = useState("");
@@ -109,12 +108,11 @@ export function OrganizationMembers({
     setConfirm("");
     setShow(false);
     setError("");
-    setMode("create");
   }
   async function save(e: FormEvent) {
     e.preventDefault();
     if (busy) return;
-    if ((editing !== "new" || mode === "create") && password !== confirm) {
+    if (password !== confirm) {
       setError("As senhas devem ser iguais.");
       return;
     }
@@ -133,8 +131,8 @@ export function OrganizationMembers({
       if (editing === "new")
         await request("/organizations/" + id + "/members", {
           email,
-          mode,
-          ...(mode === "create" ? { password } : {}),
+          mode: "create",
+          password,
           version,
           complete_setup: setup,
         });
@@ -216,66 +214,52 @@ export function OrganizationMembers({
             </h3>
           )}
           {editing === "new" && (
-            <>
-              <label>
-                Tipo de acesso
-                <select
-                  value={mode}
-                  onChange={(e) => {
-                    setMode(e.target.value);
-                    setPassword("");
-                    setConfirm("");
-                  }}
-                >
-                  <option value="create">Criar conta com senha</option>
-                  <option value="link">Vincular conta existente</option>
-                </select>
-              </label>
-              <label>
-                Email do usuário
-                <input
-                  type="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                />
-              </label>
-            </>
+            <label className="organization-account-email">
+              Email do usuário
+              <input
+                type="email"
+                autoComplete="off"
+                autoCapitalize="none"
+                spellCheck={false}
+                placeholder="nome@exemplo.com.br"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+            </label>
           )}
-          {(editing !== "new" || mode === "create") && (
-            <>
-              <p>Use ao menos 12 caracteres. A pessoa trocará a senha no primeiro acesso.</p>
-              <label>
-                Senha temporária
-                <input
-                  type={show ? "text" : "password"}
-                  autoComplete="new-password"
-                  required
-                  minLength={12}
-                  maxLength={128}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-              </label>
-              <label>
-                Confirmar senha temporária
-                <input
-                  type={show ? "text" : "password"}
-                  autoComplete="new-password"
-                  required
-                  minLength={12}
-                  maxLength={128}
-                  value={confirm}
-                  onChange={(e) => setConfirm(e.target.value)}
-                />
-              </label>
-              <label>
-                <input type="checkbox" checked={show} onChange={(e) => setShow(e.target.checked)} />{" "}
-                Mostrar senha
-              </label>
-            </>
-          )}
-          {mode === "link" && editing === "new" && <p>A senha existente será preservada.</p>}
+          <p id="organization-password-help">
+            Use ao menos 12 caracteres. A pessoa trocará a senha no primeiro acesso.
+          </p>
+          <label>
+            Senha temporária
+            <input
+              type={show ? "text" : "password"}
+              autoComplete="new-password"
+              aria-describedby="organization-password-help"
+              required
+              minLength={12}
+              maxLength={128}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          </label>
+          <label>
+            Confirmar senha temporária
+            <input
+              type={show ? "text" : "password"}
+              autoComplete="new-password"
+              required
+              minLength={12}
+              maxLength={128}
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+            />
+          </label>
+          <label>
+            <input type="checkbox" checked={show} onChange={(e) => setShow(e.target.checked)} />{" "}
+            Mostrar senha
+          </label>
         </div>
         <div className={setup ? "organization-form-actions" : "guided-body"}>
           <button className="primary" disabled={busy}>
@@ -283,7 +267,9 @@ export function OrganizationMembers({
               ? "Salvando…"
               : setup && editing === "new"
                 ? "Concluir e ativar organização"
-                : "Salvar acesso"}
+                : editing === "new"
+                  ? "Criar conta"
+                  : "Salvar senha"}
           </button>
           <button
             type="button"

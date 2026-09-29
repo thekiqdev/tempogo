@@ -3105,6 +3105,7 @@ p {
 .organization-wizard .organization-setup .guided-body label {
   margin: 0;
 }
+.organization-wizard .organization-setup .guided-body .organization-account-email,
 .organization-wizard .organization-setup .guided-body label:has(input[type="checkbox"]) {
   grid-column: 1 / -1;
 }
@@ -3541,5 +3542,62 @@ p {
   /* Keep actions stable when a field loses focus or the mobile keyboard closes. */
   .organization-wizard .organization-form-actions {
     position: static;
+  }
+}
+
+.platform-settings {
+  display: grid;
+  gap: 20px;
+  max-width: 900px;
+}
+.platform-settings-card {
+  background: white;
+  border: 1px solid var(--platform-border, #d7e3e9);
+  border-radius: 16px;
+  padding: 24px;
+}
+.platform-settings-card h2 {
+  font-size: 18px;
+  margin: 0 0 8px;
+}
+.platform-settings-card p {
+  color: var(--platform-muted);
+  font-size: 14px;
+}
+.platform-logo-preview {
+  background: #102530;
+  border-radius: 12px;
+  padding: 24px;
+  color: white;
+  margin: 20px 0;
+}
+.platform-logo-preview img {
+  max-width: 100%;
+  max-height: 90px;
+  object-fit: contain;
+}
+.platform-custom-logo {
+  max-width: 100%;
+  max-height: 44px;
+  object-fit: contain;
+}
+.crm-content .platform-security-toggle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-weight: 600;
+}
+.platform-security-toggle input {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  accent-color: #116656;
+}
+@media (max-width: 600px) {
+  .platform-settings-card {
+    padding: 18px;
+  }
+  .platform-settings input[type="file"] {
+    max-width: 100%;
   }
 }

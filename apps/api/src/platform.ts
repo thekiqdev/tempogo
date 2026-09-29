@@ -6,6 +6,7 @@ import { deliverAccountMessages, registerAccounts } from "./platform-accounts.js
 import { newTotpSecret, platformCipher, verifyTotp } from "./platform-crypto.js";
 import { deliverInvitations, registerOrganizations } from "./platform-management.js";
 import { registerOverview } from "./platform-overview.js";
+import { platformSettings, registerPlatformSettings } from "./platform-settings.js";
 import { csrfFor, digest, equal, hashPassword, token, verifyPassword } from "./security.js";
 export type PlatformOptions = {
   pool: pg.Pool;
@@ -139,10 +140,11 @@ export function registerPlatform(app: FastifyInstance, o: PlatformOptions) {
     const u = await identity(c, found.rows[0].user_id);
     if (u.state !== "active" || u.recovery_pending) throw denied();
     const r = await c.query(
-      "UPDATE app.platform_sessions SET last_seen_at=now() WHERE token_hash=$1 AND auth_version=$2 AND revoked_at IS NULL AND expires_at>now() AND last_seen_at>now()-interval '15 minutes' RETURNING expires_at,reauthenticated_until",
+      "UPDATE app.platform_sessions SET last_seen_at=now() WHERE token_hash=$1 AND auth_version=$2 AND revoked_at IS NULL AND expires_at>now() AND last_seen_at>now()-interval '15 minutes' RETURNING expires_at,reauthenticated_until,mfa_authenticated",
       [digest(raw), u.auth_version],
     );
     if (!r.rows[0]) throw denied();
+    if ((await platformSettings(c)).mfa_required && !r.rows[0].mfa_authenticated) throw denied();
     return { u, raw, ...r.rows[0] };
   }
   async function issueSession(
@@ -150,14 +152,15 @@ export function registerPlatform(app: FastifyInstance, o: PlatformOptions) {
     u: Identity,
     challengeRaw: string,
     req: FastifyRequest,
+    mfaAuthenticated = true,
   ) {
     const raw = token();
     await c.query("UPDATE app.platform_challenges SET used_at=now() WHERE token_hash=$1", [
       digest(challengeRaw),
     ]);
     await c.query(
-      "INSERT INTO app.platform_sessions(token_hash,user_id,auth_version,expires_at) VALUES($1,$2,$3,now()+interval '8 hours')",
-      [digest(raw), u.user_id, u.auth_version],
+      "INSERT INTO app.platform_sessions(token_hash,user_id,auth_version,expires_at,mfa_authenticated) VALUES($1,$2,$3,now()+interval '8 hours',$4)",
+      [digest(raw), u.user_id, u.auth_version, mfaAuthenticated],
     );
     await platformAudit(c, u.user_id, u.user_id, "platform.login", req.id);
     return raw;
@@ -194,6 +197,7 @@ export function registerPlatform(app: FastifyInstance, o: PlatformOptions) {
   registerOrganizations(app, o, session);
   registerAccounts(app, o, session);
   registerOverview(app, o, session);
+  registerPlatformSettings(app, o, session);
   let delivering: Promise<unknown> | undefined;
   const deliver = () => {
     if (!delivering)
@@ -237,13 +241,27 @@ export function registerPlatform(app: FastifyInstance, o: PlatformOptions) {
     const r = await transaction(o.pool, async (c) => {
       const u = await identity(c, found.id);
       if (u.password_hash !== found.password_hash) throw denied();
+      if (!(await platformSettings(c)).mfa_required) {
+        if (u.recovery_pending) throw denied();
+        if (u.state === "invited")
+          await c.query(
+            "UPDATE app.platform_privileges SET state='active',version=version+1 WHERE user_id=$1",
+            [u.user_id],
+          );
+        return {
+          raw: await issueSession(c, u, "", req, false),
+          purpose: "session",
+          email: u.email,
+        };
+      }
       const mfa = await c.query("SELECT user_id FROM app.platform_mfa WHERE user_id=$1", [
         u.user_id,
       ]);
       const purpose = mfa.rowCount ? "verify" : "enroll";
-      if (purpose === "enroll" && u.state !== "invited") throw denied();
+
       return { raw: await issueChallenge(c, u, purpose), purpose };
     });
+    if (r.purpose === "session") return returnSession(reply, r.raw, r.email!);
     return returnChallenge(reply, r.raw, r.purpose);
   });
   app.post(prefix + "/auth/mfa/enroll", async (req, reply) => {
@@ -362,20 +380,27 @@ export function registerPlatform(app: FastifyInstance, o: PlatformOptions) {
         csrf_token: csrfFor(s.raw),
         expires_at: s.expires_at,
         reauthenticated_until: s.reauthenticated_until,
-        mfa_enabled: true,
+        mfa_required: (await platformSettings(c)).mfa_required,
+        mfa_enabled: !!(
+          await c.query("SELECT 1 FROM app.platform_mfa WHERE user_id=$1", [s.u.user_id])
+        ).rowCount,
       };
     }),
   );
   app.post(prefix + "/auth/reauthenticate", async (req, reply) => {
     const input = z
-      .object({ password: z.string().min(1).max(128), code })
+      .object({ password: z.string().min(1).max(128), code: code.optional() })
       .strict()
       .parse(req.body);
     await limit(req, reply, "reauth:" + req.ip, 20);
     return transaction(o.pool, async (c) => {
       const s = await session(req, c, true);
       if (!(await verifyPassword(input.password, s.u.password_hash))) throw denied();
-      await checkFactor(c, s.u, input.code);
+      if ((await platformSettings(c)).mfa_required) {
+        if (!input.code)
+          throw new HttpError(401, "MFA_REQUIRED", "Informe o código do autenticador.");
+        await checkFactor(c, s.u, input.code);
+      }
       const r = await c.query(
         "UPDATE app.platform_sessions SET reauthenticated_until=now()+interval '5 minutes' WHERE token_hash=$1 RETURNING reauthenticated_until",
         [digest(s.raw)],

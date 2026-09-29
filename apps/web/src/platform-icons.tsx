@@ -1,6 +1,7 @@
 import type { SVGProps } from "react";
 
 const shapes: Record<string, string> = {
+  configuracoes: "M4 7h16 M4 17h16 M8 4v6 M16 14v6",
   sidebar: "M3 4h18v16H3z M9 4v16 M5 8h1 M5 12h1",
   "": "M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z",
   organizacoes:

@@ -5,6 +5,7 @@ import { PlatformIcon } from "./platform-icons";
 import { InvitationDirectory } from "./platform-invitations";
 import { Organizations } from "./platform-organizations";
 import { AuditPanel, OverviewPanel } from "./platform-overview";
+import { PlatformLogo, PlatformSettings, useMfaRequired } from "./platform-settings";
 
 const links = [
   ["", "Visão geral", "◫"],
@@ -12,6 +13,7 @@ const links = [
   ["super-admins", "Super admins", "◇"],
   ["convites", "Convites", "✉"],
   ["auditoria", "Auditoria", "≡"],
+  ["configuracoes", "Configurações", "⚙"],
 ] as const;
 export function PlatformWorkspace({
   csrf,
@@ -26,6 +28,7 @@ export function PlatformWorkspace({
   onReauth: () => void;
   onLogout: () => void;
 }) {
+  const mfaRequired = useMfaRequired();
   const [path, setPath] = useState(location.pathname),
     [menu, setMenu] = useState(false),
     [collapsed, setCollapsed] = useState(() => {
@@ -174,7 +177,7 @@ export function PlatformWorkspace({
           }}
         >
           <span className="crm-brand-full">
-            Tempo<span>Go</span>
+            <PlatformLogo />
           </span>
           <span className="crm-brand-short" aria-hidden="true">
             T<span>G</span>
@@ -250,7 +253,7 @@ export function PlatformWorkspace({
               <span aria-hidden="true">⌄</span>
             </summary>
             <div>
-              <p>Autenticação em duas etapas ativa</p>
+              <p>{mfaRequired ? "Authenticator obrigatório" : "Acesso com email e senha"}</p>
               <button
                 onClick={(e) => {
                   e.currentTarget.closest("details")?.removeAttribute("open");
@@ -291,6 +294,8 @@ export function PlatformWorkspace({
             </p>
           ) : section === "convites" ? (
             <InvitationDirectory csrf={csrf} />
+          ) : section === "configuracoes" ? (
+            <PlatformSettings csrf={csrf} />
           ) : section === "auditoria" ? (
             <AuditPanel />
           ) : (

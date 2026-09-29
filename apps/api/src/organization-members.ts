@@ -44,7 +44,10 @@ export function registerOrganizationMembers(
         await c.query("SELECT id,active FROM app.users WHERE email=$1 FOR UPDATE", [input.email])
       ).rows[0];
       if (input.mode === "create" && u)
-        throw failure("USER_EXISTS", "Email já cadastrado. Selecione vincular conta existente.");
+        throw failure(
+          "USER_EXISTS",
+          "Este email já está cadastrado. Informe outro email para criar uma nova conta.",
+        );
       if (input.mode === "link" && !u)
         throw failure("USER_NOT_FOUND", "Conta não encontrada. Selecione criar conta.", 404);
       if (!u)

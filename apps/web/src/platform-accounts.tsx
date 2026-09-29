@@ -249,9 +249,7 @@ export function Accounts({
           onClose={() => setCreating(false)}
           onCreated={(id) => {
             setCreating(false);
-            setNotice(
-              "Superadmin cadastrado. O titular já pode entrar com email e senha e configurar o MFA.",
-            );
+            setNotice("Superadmin cadastrado. O titular já pode entrar com email e senha.");
             open(id);
           }}
         />
@@ -303,9 +301,11 @@ export function Accounts({
                 {u.active ? "Ativa" : "Bloqueada"}
                 {u.platform_state !== "none" &&
                   " · Super admin: " +
-                    ({ active: "Ativo", invited: "Aguardando MFA", revoked: "Revogado" }[
-                      u.platform_state
-                    ] ?? u.platform_state)}
+                    ({
+                      active: "Ativo",
+                      invited: "Aguardando primeiro acesso",
+                      revoked: "Revogado",
+                    }[u.platform_state] ?? u.platform_state)}
               </li>
             ))}
           </ul>

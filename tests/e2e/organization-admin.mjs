@@ -227,6 +227,7 @@ try {
   await expect(
     page.getByRole("button", { name: "Concluir e ativar organização", exact: true }),
   ).toBeInViewport({ ratio: 1 });
+  await expect(page.getByLabel("Tipo de acesso", { exact: true })).toHaveCount(0);
   await page.screenshot({ path: "tmp/organization-admin/setup-step2-1366.png" });
   await mkdir("tmp/organization-admin", { recursive: true });
   for (const width of [1280, 390, 360]) {
@@ -289,7 +290,7 @@ try {
   const reset = "Reset-Temporary-54321";
   await page.getByLabel("Senha temporária", { exact: true }).fill(reset);
   await page.getByLabel("Confirmar senha temporária", { exact: true }).fill(reset);
-  await page.getByRole("button", { name: "Salvar acesso", exact: true }).click();
+  await page.getByRole("button", { name: "Salvar senha", exact: true }).click();
   await page.getByRole("button", { name: "Confirmar ação", exact: true }).click();
   await expect(
     page.getByText("Acesso atualizado. Senhas novas devem ser trocadas no primeiro login.", {
@@ -348,6 +349,66 @@ try {
     superPage.getByRole("button", { name: "Gerar chave do autenticador" }),
   ).toBeVisible();
   await superPage.close();
+  await page
+    .locator(".crm-sidebar")
+    .getByRole("link", { name: "Configurações", exact: true })
+    .click();
+  await expect(
+    page.getByRole("switch", { name: "Exigir Authenticator dos superadmins" }),
+  ).toBeChecked();
+  await page.getByLabel("Logo da plataforma", { exact: true }).setInputFiles({
+    name: "logo.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=",
+      "base64",
+    ),
+  });
+  await expect(page.getByAltText("Prévia do logo")).toBeVisible();
+  await page.getByRole("switch").uncheck();
+  await page.getByRole("button", { name: "Salvar configurações" }).click();
+  await expect(page.getByRole("status")).toHaveText("Configurações salvas.");
+  await expect(page.locator(".crm-brand").getByAltText("Logo da plataforma")).toBeVisible();
+  await page.getByRole("button", { name: "Restaurar logo TempoGo" }).click();
+  await page.getByRole("button", { name: "Salvar configurações" }).click();
+  await expect(page.getByAltText("Prévia do logo")).toHaveCount(0);
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    assert.equal(
+      await page.evaluate(() => document.documentElement.scrollWidth > innerWidth),
+      false,
+    );
+    await page.screenshot({ path: folder + "/settings-" + width + ".png", fullPage: true });
+  }
+  const optional = await browser.newPage();
+  await optional.goto(origin + "/plataforma");
+  await optional.getByLabel("Email", { exact: true }).fill("direct-admin@organization.test");
+  await optional.getByLabel("Senha", { exact: true }).fill("Direct-admin-password-123");
+  await optional.getByRole("button", { name: "Continuar", exact: true }).click();
+  await expect(optional.locator(".crm-sidebar")).toBeVisible();
+  await optional.getByLabel("Conta: direct-admin@organization.test").click();
+  await optional.getByRole("button", { name: "Confirmar identidade", exact: true }).click();
+  await expect(optional.getByLabel("Código do autenticador", { exact: true })).toHaveCount(0);
+  await optional.getByLabel("Senha", { exact: true }).fill("Direct-admin-password-123");
+  await optional.getByRole("button", { name: "Continuar", exact: true }).click();
+  await expect(optional.getByRole("status")).toContainText("Identidade confirmada");
+  await optional
+    .locator(".crm-sidebar")
+    .getByRole("link", { name: "Configurações", exact: true })
+    .click();
+  await optional.getByRole("switch").check();
+  const savedSettings = optional.waitForResponse(
+    (r) => r.url().endsWith("/platform/settings") && r.request().method() === "POST",
+  );
+  await optional.getByRole("button", { name: "Salvar configurações" }).click();
+  assert.equal((await savedSettings).status(), 200);
+  assert.equal((await optional.request.get(origin + "/api/v1/platform/auth/me")).status(), 401);
+
+  await expect(
+    optional.getByRole("heading", { name: "Entrar na plataforma", exact: true }),
+  ).toBeVisible();
+  await optional.close();
+
   assert.equal((await db.query("SELECT count(*)::int n FROM app.invitation_outbox")).rows[0].n, 0);
   assert.deepEqual(errors, []);
   console.log(

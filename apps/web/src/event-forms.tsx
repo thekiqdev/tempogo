@@ -3,6 +3,8 @@ import { type FormEvent, useEffect, useRef, useState } from "react";
 import { kilometersToMeters, timezoneLabels } from "./admin-format";
 import { api } from "./api";
 
+const distanceInput = /^\d*(?:[.,]\d{0,3})?$/;
+
 export function EventForm({
   race,
   onSave,
@@ -151,8 +153,12 @@ export function EventForm({
               <input
                 name="distance"
                 inputMode="decimal"
+                pattern="[0-9]+([.,][0-9]{1,3})?"
+                autoComplete="off"
                 value={values.distance}
-                onChange={(e) => update("distance", e.target.value)}
+                onChange={(e) => {
+                  if (distanceInput.test(e.target.value)) update("distance", e.target.value);
+                }}
                 placeholder="Ex.: 5 ou 21,1"
                 aria-describedby="event-distance-help"
               />
@@ -170,7 +176,7 @@ export function EventForm({
               ))}
             </div>
             <p className="field-help" id="event-distance-help">
-              Pode deixar em branco. Esta prova terá uma modalidade, sem voltas.
+              Use números e vírgula ou ponto para decimais (até 3 casas). Pode deixar em branco.
             </p>
           </>
         )}
@@ -456,8 +462,11 @@ export function CheckpointForm({
           <input
             name="distance"
             inputMode="decimal"
+            pattern="[0-9]+([.,][0-9]{1,3})?"
+            autoComplete="off"
             value={distance}
             onChange={(e) => {
+              if (!distanceInput.test(e.target.value)) return;
               setDistance(e.target.value);
               setDirty(true);
             }}
@@ -465,21 +474,39 @@ export function CheckpointForm({
             aria-describedby="checkpoint-distance-help"
           />
         </label>
+        <div className="distance-presets" aria-label="Distâncias frequentes do checkpoint">
+          {["0", "2,5", "5", "10", "21,1", "42,195"].map((km) => (
+            <button
+              type="button"
+              key={km}
+              aria-pressed={distance.replace(".", ",") === km}
+              onClick={() => {
+                setDistance(km);
+                setDirty(true);
+                setError("");
+              }}
+            >
+              {km} km
+            </button>
+          ))}
+        </div>
         <p className="field-help" id="checkpoint-distance-help">
-          Distância desde a largada até este ponto. Na largada, use 0. Pode deixar em branco.
+          Distância desde a largada até este ponto. Use vírgula ou ponto para decimais (até 3
+          casas). Na largada, use 0. Pode deixar em branco.
         </p>
         <label>
           Ordem no percurso
           <input
             name="sequence"
-            type="number"
+            type="text"
             inputMode="numeric"
-            min={1}
-            max={10000}
-            step={1}
+            pattern="([1-9][0-9]{0,3}|10000)"
+            title="Informe um número inteiro entre 1 e 10000."
+            maxLength={5}
             required
             value={sequence}
             onChange={(e) => {
+              if (!/^[0-9]*$/.test(e.target.value)) return;
               setSequence(e.target.value);
               setDirty(true);
             }}

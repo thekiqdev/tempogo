@@ -11,7 +11,7 @@ export type PlatformGuard = (
   r: FastifyRequest,
   c: pg.PoolClient,
   write?: boolean,
-) => Promise<{ u: { user_id: string }; reauthenticated_until?: Date }>;
+) => Promise<{ u: { user_id: string }; reauthenticated_until?: Date; mfa_authenticated?: boolean }>;
 export const uuid = z.string().uuid(),
   email = z.string().trim().toLowerCase().email().max(254),
   version = z.number().int().nonnegative(),

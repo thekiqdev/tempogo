@@ -15,6 +15,7 @@ import {
   uuid,
   version,
 } from "./platform-management.js";
+import { platformSettings } from "./platform-settings.js";
 import { digest, hashPassword, token, verifyPassword } from "./security.js";
 export function registerAccounts(app: FastifyInstance, o: PlatformOptions, guard: PlatformGuard) {
   const base = "/api/v1/platform",
@@ -43,14 +44,14 @@ export function registerAccounts(app: FastifyInstance, o: PlatformOptions, guard
       current &&
       !(
         await c.query(
-          "SELECT 1 FROM app.platform_privileges p JOIN app.users u ON u.id=p.user_id JOIN app.platform_mfa m ON m.user_id=u.id WHERE p.state='active' AND u.active AND NOT p.recovery_pending AND p.user_id!=$1 LIMIT 1",
+          "SELECT 1 FROM app.platform_privileges p JOIN app.users u ON u.id=p.user_id LEFT JOIN app.platform_mfa m ON m.user_id=u.id WHERE (NOT (SELECT mfa_required FROM app.platform_settings WHERE singleton) OR m.user_id IS NOT NULL) AND p.state='active' AND u.active AND NOT p.recovery_pending AND p.user_id!=$1 LIMIT 1",
           [id],
         )
       ).rowCount
     )
       throw failure(
         "LAST_SUPER_ADMIN",
-        "A plataforma precisa manter ao menos um super admin ativo com MFA.",
+        "A plataforma precisa manter ao menos um super admin ativo apto a acessar.",
       );
   }
   async function revoke(c: pg.PoolClient, id: string, scope = "all", org?: string) {
@@ -117,9 +118,9 @@ export function registerAccounts(app: FastifyInstance, o: PlatformOptions, guard
           u.id,
         ]);
         await managementAudit(c, actor, null, "platform.created", u.id, req.id, {
-          enrollment_required: true,
+          enrollment_required: (await platformSettings(c)).mfa_required,
         });
-        return { user: u, mfa_required: true };
+        return { user: u, mfa_required: (await platformSettings(c)).mfa_required };
       },
     );
     reply.code(201);

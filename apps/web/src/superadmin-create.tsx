@@ -1,5 +1,6 @@
 import { type FormEvent, useRef, useState } from "react";
 import { useActionConfirmation } from "./platform-dialog";
+import { useMfaRequired } from "./platform-settings";
 import { PlatformSheet } from "./platform-sheet";
 
 export function SuperadminCreate({
@@ -11,6 +12,7 @@ export function SuperadminCreate({
   onClose: () => void;
   onCreated: (id: string) => void;
 }) {
+  const mfaRequired = useMfaRequired();
   const [email, setEmail] = useState(""),
     [password, setPassword] = useState(""),
     [confirm, setConfirm] = useState(""),
@@ -45,7 +47,7 @@ export function SuperadminCreate({
         const r = await fetch("/api/v1/platform/auth/reauthenticate", {
           method: "POST",
           headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf },
-          body: JSON.stringify({ password: actorPassword, code }),
+          body: JSON.stringify({ password: actorPassword, ...(mfaRequired ? { code } : {}) }),
         });
         const d = await r.json();
         if (!r.ok) throw Error(d.error?.message ?? "Não foi possível confirmar sua identidade.");
@@ -90,7 +92,7 @@ export function SuperadminCreate({
       <PlatformSheet title="Cadastrar superadmin" busy={busy} onClose={() => void close()}>
         <p>
           Cadastre o acesso com email e senha. Não será enviado convite. No primeiro acesso, o
-          titular configura o MFA.
+          titular segue a configuração de segurança da plataforma.
         </p>
         {error && (
           <p role="alert" className="error">
@@ -150,17 +152,19 @@ export function SuperadminCreate({
                   onChange={(e) => setActorPassword(e.target.value)}
                 />
               </label>
-              <label>
-                Seu código MFA
-                <input
-                  required
-                  inputMode="numeric"
-                  pattern="[0-9]{6}"
-                  autoComplete="one-time-code"
-                  value={code}
-                  onChange={(e) => setCode(e.target.value)}
-                />
-              </label>
+              {mfaRequired && (
+                <label>
+                  Seu código MFA
+                  <input
+                    required
+                    inputMode="numeric"
+                    pattern="[0-9]{6}"
+                    autoComplete="one-time-code"
+                    value={code}
+                    onChange={(e) => setCode(e.target.value)}
+                  />
+                </label>
+              )}
             </fieldset>
           )}
           <button className="primary" disabled={busy}>
