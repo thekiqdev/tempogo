@@ -4609,3 +4609,36 @@ p {
 .record-support button {
   margin: 4px 8px 4px 0;
 }
+
+.passages-workspace .passage-inline-review {
+  grid-column: 1 / -1;
+  min-width: 0;
+  width: 100%;
+  padding: 18px 0 0;
+  border-top: 1px solid #dde6e9;
+  overflow-wrap: anywhere;
+}
+.passage-inline-review .section-title {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.passage-inline-review form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.passage-inline-review form > p,
+.passage-inline-review form > button {
+  grid-column: 1 / -1;
+}
+.passage-inline-review input,
+.passage-inline-review select,
+.passage-inline-review textarea {
+  min-width: 0;
+  width: 100%;
+}
+@media (max-width: 700px) {
+  .passage-inline-review form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

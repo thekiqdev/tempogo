@@ -89,6 +89,25 @@ await page.route("**/api/v1/**", async (route) => {
       invalidated: 0,
       updated_at: new Date().toISOString(),
     };
+  else if (/^\/events\/mobile-event\/observations\/obs-[12]$/.test(path))
+    data = {
+      observation: {
+        id: path.split("/").pop(),
+        bib: "00123",
+        effective_bib: "00123",
+        raw_captured_at: new Date().toISOString(),
+        effective_captured_at: new Date().toISOString(),
+        status: "accepted",
+        disposition: "accepted",
+        version: 0,
+        evidence_version: 0,
+        operator_name: path.endsWith("obs-2") ? "Bruno Lima" : "Ana Souza",
+        access_label: "Celular 01",
+      },
+      revisions: [],
+      flags: [],
+      requests: [],
+    };
   else if (path === "/events/mobile-event/checkpoints") {
     if (req.method() === "GET" && failPoints) {
       await route.fulfill({
@@ -281,6 +300,24 @@ try {
   await capture("09-menu-em-andamento");
   await page.getByText("Ver registros do grupo", { exact: true }).click();
   await expect(page.locator(".passage-evidence")).toContainText("Bruno Lima");
+  const passageRow = page.locator(".passage-list > li").first();
+  const reviewButton = passageRow.getByRole("button", { name: "Revisar 00123", exact: true });
+  await reviewButton.click();
+  await expect(passageRow.getByRole("region", { name: "Revisão da passagem" })).toBeVisible();
+  await expect(reviewButton).toHaveAttribute("aria-expanded", "true");
+  await expect(passageRow.getByLabel("Número corrigido")).toHaveValue("00123");
+  await capture("10a-revisao-na-linha");
+  await reviewButton.click();
+  await expect(page.getByRole("region", { name: "Revisão da passagem" })).toHaveCount(0);
+  await passageRow
+    .getByRole("button", { name: "Revisar este registro", exact: true })
+    .last()
+    .click();
+  await expect(passageRow.getByRole("region", { name: "Revisão da passagem" })).toContainText(
+    "Bruno Lima",
+  );
+  await passageRow.getByRole("button", { name: "Fechar revisão", exact: true }).click();
+  await expect(page.getByRole("region", { name: "Revisão da passagem" })).toHaveCount(0);
   await capture("10-passagens-consolidadas");
   await page.setViewportSize({ width: 1280, height: 900 });
   await page

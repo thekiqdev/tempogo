@@ -73,10 +73,11 @@ export function ObservationPanel({ eventId, points }: { eventId: string; points:
     [detail, setDetail] = useState<Detail | null>(null),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
+  const [reviewRow, setReviewRow] = useState<string | null>(null);
+  const reviewRequest = useRef(0);
   const reviewPanel = useRef<HTMLElement>(null);
   useEffect(() => {
     if (detail) {
-      reviewPanel.current?.scrollIntoView({ block: "start", behavior: "smooth" });
       reviewPanel.current?.focus({ preventScroll: true });
     }
   }, [detail?.observation.id]);
@@ -117,12 +118,27 @@ export function ObservationPanel({ eventId, points }: { eventId: string; points:
     setData(null);
     setQuery(q.toString());
   }
-  async function open(id: string) {
+  function closeReview() {
+    reviewRequest.current++;
+    setReviewRow(null);
+    setDetail(null);
+  }
+  useEffect(() => {
+    closeReview();
+  }, [path, query, offset, pageSize]);
+  async function open(id: string, rowId: string) {
+    const requestId = ++reviewRequest.current;
+    setReviewRow(rowId);
+    setDetail(null);
     try {
-      setDetail(await api<Detail>(path + "/" + id));
+      const result = await api<Detail>(path + "/" + id);
+      if (requestId !== reviewRequest.current) return;
+      setDetail(result);
       setError("");
     } catch (e) {
+      if (requestId !== reviewRequest.current) return;
       setError((e as Error).message);
+      setReviewRow(null);
     }
   }
   async function save(e: FormEvent<HTMLFormElement>) {
@@ -146,7 +162,7 @@ export function ObservationPanel({ eventId, points }: { eventId: string; points:
         ...payload,
         request_id: attempt.current.id,
       });
-      await open(detail.observation.id);
+      await open(detail.observation.id, reviewRow ?? detail.observation.id);
       await refresh();
     } catch (e) {
       setError((e as Error).message);
@@ -295,9 +311,12 @@ export function ObservationPanel({ eventId, points }: { eventId: string; points:
             <button
               className="secondary passage-review"
               aria-label={"Revisar " + i.effective_bib}
-              onClick={() => open(i.id)}
+              aria-expanded={reviewRow === i.id}
+              aria-controls={reviewRow === i.id ? "review-" + i.id : undefined}
+              disabled={busy}
+              onClick={() => (reviewRow === i.id ? closeReview() : open(i.id, i.id))}
             >
-              Revisar
+              {reviewRow === i.id ? "Fechar revisão" : "Revisar"}
             </button>
             {(i.members?.length ?? 0) > 1 && (
               <details className="passage-evidence">
@@ -310,12 +329,117 @@ export function ObservationPanel({ eventId, points }: { eventId: string; points:
                       {m.access_label}
                     </p>
                     <p>{stamp(m.effective_captured_at)}</p>
-                    <button className="secondary" onClick={() => open(m.id)}>
+                    <button className="secondary" disabled={busy} onClick={() => open(m.id, i.id)}>
                       Revisar este registro
                     </button>
                   </article>
                 ))}
               </details>
+            )}
+            {reviewRow === i.id && detail && (
+              <section
+                ref={reviewPanel}
+                tabIndex={-1}
+                id={"review-" + i.id}
+                className="passage-inline-review"
+                aria-label="Revisão da passagem"
+              >
+                <div className="section-title">
+                  <h3>Revisão da passagem {detail.observation.effective_bib}</h3>
+                  <button className="secondary" disabled={busy} onClick={closeReview}>
+                    Fechar revisão
+                  </button>
+                </div>
+                <p>
+                  Origem:{" "}
+                  {detail.observation.operator_name ? detail.observation.operator_name + " · " : ""}
+                  {detail.observation.access_label}
+                </p>
+                <p className="field-help">
+                  Invalidar a primeira captura faz a próxima válida assumir o grupo. Corrigir número
+                  ou horário recalcula o agrupamento.
+                </p>
+                <p>
+                  Original: {detail.observation.bib} · {stamp(detail.observation.raw_captured_at)}.
+                  Vigente: {detail.observation.effective_bib} ·{" "}
+                  {stamp(detail.observation.effective_captured_at)} ·{" "}
+                  {statusLabel[detail.observation.status]}.
+                </p>
+                <p>
+                  Evidências:{" "}
+                  {detail.flags.map((f) => flagLabels[f.reason] ?? f.reason).join(", ") ||
+                    "Nenhuma sinalização"}
+                </p>
+                {detail.requests.map((r) => (
+                  <p key={r.id}>
+                    Solicitação do operador em {stamp(r.created_at)}: {r.reason}
+                  </p>
+                ))}
+                <form
+                  key={detail.observation.id + ":" + detail.observation.version}
+                  onSubmit={save}
+                >
+                  <label>
+                    Número corrigido
+                    <input
+                      name="bib"
+                      required
+                      pattern="[0-9]{1,8}"
+                      maxLength={8}
+                      defaultValue={detail.observation.effective_bib}
+                    />
+                  </label>
+                  <label>
+                    Horário vigente (fuso do aparelho)
+                    <input
+                      name="captured_at"
+                      type="datetime-local"
+                      step="0.001"
+                      required
+                      defaultValue={local(detail.observation.effective_captured_at)}
+                    />
+                  </label>
+                  <label>
+                    Decisão
+                    <select name="disposition" defaultValue={detail.observation.disposition}>
+                      <option value="accepted">Aceitar passagem</option>
+                      <option value="invalidated">Invalidar passagem</option>
+                    </select>
+                  </label>
+                  <label>
+                    Motivo da revisão
+                    <textarea name="reason" required minLength={3} maxLength={500} />
+                  </label>
+                  <p>
+                    Salvar confirma a análise das evidências e solicitações exibidas. O original
+                    permanece no histórico.
+                  </p>
+                  <button className="primary" disabled={busy}>
+                    Salvar revisão
+                  </button>
+                </form>
+                <h3>Histórico de revisões</h3>
+                {detail.revisions.map((r) => (
+                  <article className="audit" key={r.id}>
+                    <strong>
+                      Versão {r.version} · {r.actor}
+                    </strong>
+                    <p>
+                      {stamp(r.created_at)} · {r.reason}
+                    </p>
+                    <p>
+                      Antes: {r.before_value.bib} · {stamp(r.before_value.captured_at)} ·{" "}
+                      {statusLabel[r.before_value.disposition]}. Depois: {r.bib} ·{" "}
+                      {stamp(r.captured_at)} · {statusLabel[r.disposition]}.
+                    </p>
+                  </article>
+                ))}
+              </section>
+            )}
+            {reviewRow === i.id && !detail && (
+              <p id={"review-" + i.id} className="passage-inline-review" role="status">
+                Carregando revisão…
+              </p>
             )}
           </li>
         ))}
@@ -382,97 +506,6 @@ export function ObservationPanel({ eventId, points }: { eventId: string; points:
         Atualização automática a cada 15 segundos. CSV em UTC; preserve o número como texto ao
         importar. Não representa resultado oficial.
       </p>
-      {detail && (
-        <section ref={reviewPanel} tabIndex={-1} className="panel" aria-label="Revisão da passagem">
-          <div className="section-title">
-            <h3>Revisão da passagem {detail.observation.effective_bib}</h3>
-            <button className="secondary" onClick={() => setDetail(null)}>
-              Fechar revisão
-            </button>
-          </div>
-          <p>
-            Origem:{" "}
-            {detail.observation.operator_name ? detail.observation.operator_name + " · " : ""}
-            {detail.observation.access_label}
-          </p>
-          <p className="field-help">
-            Invalidar a primeira captura faz a próxima válida assumir o grupo. Corrigir número ou
-            horário recalcula o agrupamento.
-          </p>
-          <p>
-            Original: {detail.observation.bib} · {stamp(detail.observation.raw_captured_at)}.
-            Vigente: {detail.observation.effective_bib} ·{" "}
-            {stamp(detail.observation.effective_captured_at)} ·{" "}
-            {statusLabel[detail.observation.status]}.
-          </p>
-          <p>
-            Evidências:{" "}
-            {detail.flags.map((f) => flagLabels[f.reason] ?? f.reason).join(", ") ||
-              "Nenhuma sinalização"}
-          </p>
-          {detail.requests.map((r) => (
-            <p key={r.id}>
-              Solicitação do operador em {stamp(r.created_at)}: {r.reason}
-            </p>
-          ))}
-          <form key={detail.observation.id + ":" + detail.observation.version} onSubmit={save}>
-            <label>
-              Número corrigido
-              <input
-                name="bib"
-                required
-                pattern="[0-9]{1,8}"
-                maxLength={8}
-                defaultValue={detail.observation.effective_bib}
-              />
-            </label>
-            <label>
-              Horário vigente (fuso do aparelho)
-              <input
-                name="captured_at"
-                type="datetime-local"
-                step="0.001"
-                required
-                defaultValue={local(detail.observation.effective_captured_at)}
-              />
-            </label>
-            <label>
-              Decisão
-              <select name="disposition" defaultValue={detail.observation.disposition}>
-                <option value="accepted">Aceitar passagem</option>
-                <option value="invalidated">Invalidar passagem</option>
-              </select>
-            </label>
-            <label>
-              Motivo da revisão
-              <textarea name="reason" required minLength={3} maxLength={500} />
-            </label>
-            <p>
-              Salvar confirma a análise das evidências e solicitações exibidas. O original permanece
-              no histórico.
-            </p>
-            <button className="primary" disabled={busy}>
-              Salvar revisão
-            </button>
-          </form>
-          <h3>Histórico de revisões</h3>
-          {detail.revisions.map((r) => (
-            <article className="audit" key={r.id}>
-              <strong>
-                Versão {r.version} · {r.actor}
-              </strong>
-              <p>
-                {stamp(r.created_at)} · {r.reason}
-              </p>
-              <p>
-                Antes: {r.before_value.bib} · {stamp(r.before_value.captured_at)} ·{" "}
-                {statusLabel[r.before_value.disposition]}. Depois: {r.bib} · {stamp(r.captured_at)}{" "}
-                · {statusLabel[r.disposition]}.
-              </p>
-            </article>
-          ))}
-        </section>
-      )}
     </section>
   );
 }
