@@ -96,13 +96,6 @@ try {
   await page.getByRole("button", { name: "Acessos", exact: true }).click();
   await page.getByLabel("Checkpoint do acesso").selectOption({ label: "Chegada" });
   await page.getByLabel("Identificação do aparelho").fill("Chegada · celular de teste");
-  await page
-    .getByLabel("Válido até")
-    .fill(
-      new Date(Date.now() + 3600000 - new Date().getTimezoneOffset() * 60000)
-        .toISOString()
-        .slice(0, 16),
-    );
   await page.getByRole("button", { name: "Gerar acesso" }).click();
   const code = await page.getByTestId("issued-code").innerText();
   await page.getByRole("button", { name: "Concluir" }).click();

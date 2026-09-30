@@ -23,7 +23,7 @@ export type FieldSession = {
   checkpoint_name: string;
   label: string;
   state: string;
-  expires_at: string;
+  expires_at: string | null;
   csrf_token: string;
 };
 export type ClockSample = {

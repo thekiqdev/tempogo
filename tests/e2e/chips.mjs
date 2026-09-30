@@ -45,7 +45,7 @@ try {
   await page.getByRole("button", { name: "+ Novo evento", exact: true }).click();
   await page.getByLabel("Nome do evento").fill("Prova com voltas");
   await page.getByLabel("Número de voltas", { exact: true }).fill("3");
-  await page.getByLabel("Intervalo mínimo entre voltas (segundos)", { exact: true }).fill("300");
+  await page.getByLabel("Intervalo mínimo entre voltas (minutos)", { exact: true }).fill("2,5");
   await page.getByRole("button", { name: "Continuar", exact: true }).click();
   await page.getByLabel("Data da prova").fill("2026-10-10");
   await page.getByRole("button", { name: "Continuar", exact: true }).click();
@@ -65,7 +65,7 @@ try {
     { bib: "002", chip: "ABC002" },
   ]);
   expect(race.laps).toBe(3);
-  expect(race.min_lap_seconds).toBe(300);
+  expect(race.min_lap_seconds).toBe(150);
   await page.setViewportSize({ width: 1280, height: 900 });
   await page
     .locator(".admin-desktop-tabs")

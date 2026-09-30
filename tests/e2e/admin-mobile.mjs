@@ -132,7 +132,7 @@ await page.route("**/api/v1/**", async (route) => {
         access_url: "http://127.0.0.1:5173/checkpoint#access=fixture-" + accesses.length,
         label: body.label,
         operator_name: body.operator_name,
-        expires_at: body.expires_at,
+        expires_at: null,
         revoked_at: null,
         online: true,
       };
@@ -231,11 +231,7 @@ try {
   await page.getByLabel("Operador responsável (opcional)").fill("Ana Souza");
   await page.getByLabel("Identificação do aparelho").fill("Celular equipe 01");
   const future = new Date(Date.now() + 86400000);
-  await page
-    .getByLabel("Válido até")
-    .fill(
-      new Date(future.getTime() - future.getTimezoneOffset() * 60000).toISOString().slice(0, 16),
-    );
+  await expect(page.getByLabel("Válido até")).toHaveCount(0);
   await page.getByRole("button", { name: "Gerar acesso", exact: true }).click();
   await expect(page.getByTestId("issued-code")).toHaveText("CODE0");
   await page.getByRole("button", { name: "Copiar código", exact: true }).click();
@@ -261,7 +257,7 @@ try {
   await page.getByRole("button", { name: "Revogar acesso", exact: true }).click();
   await page.getByRole("button", { name: "Confirmar revogação", exact: true }).click();
   await expect(page.getByRole("button", { name: "Revogar acesso", exact: true })).toHaveCount(0);
-  await page.getByLabel("Mostrar expirados e revogados").check();
+  await page.getByLabel("Mostrar encerrados e revogados").check();
   await expect(page.locator(".access-list")).toContainText("Ana Souza");
   await capture("08-acessos-checkpoint");
   await page.getByRole("button", { name: "← Voltar aos checkpoints", exact: true }).click();
@@ -346,11 +342,7 @@ try {
     await page.getByRole("button", { name: "+ Novo acesso", exact: true }).click();
     await page.getByLabel("Operador responsável (opcional)").fill(operatorName);
     await page.getByLabel("Identificação do aparelho").fill(deviceName);
-    await page
-      .getByLabel("Válido até")
-      .fill(
-        new Date(future.getTime() - future.getTimezoneOffset() * 60000).toISOString().slice(0, 16),
-      );
+    await expect(page.getByLabel("Válido até")).toHaveCount(0);
     await page.getByRole("button", { name: "Gerar acesso", exact: true }).click();
     await page.getByRole("button", { name: "Concluir" }).click();
   }

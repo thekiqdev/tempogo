@@ -28,7 +28,7 @@ type Field = {
   credential_id: string;
   device_id: string;
   label: string;
-  expires_at: Date;
+  expires_at: Date | null;
   event_name: string;
   checkpoint_name: string;
   state: string;
@@ -45,7 +45,9 @@ export function registerCapture(
     return {
       ...publicFields,
       access_url:
-        credential.revoked_at || Date.parse(credential.expires_at) <= Date.now()
+        credential.revoked_at ||
+        credential.event_closed ||
+        (credential.expires_at && Date.parse(credential.expires_at) <= Date.now())
           ? null
           : options.origin +
             "/evento/" +
@@ -99,8 +101,9 @@ export function registerCapture(
     JOIN app.events e ON e.id=s.event_id AND e.organization_id=s.organization_id
     JOIN app.checkpoints p ON p.id=s.checkpoint_id AND p.organization_id=s.organization_id
     JOIN app.organizations org ON org.id=s.organization_id
-    WHERE s.token_hash=$1 AND s.revoked_at IS NULL AND s.expires_at>clock_timestamp()
-    AND cr.revoked_at IS NULL AND cr.expires_at>clock_timestamp() AND p.active AND org.active
+    WHERE s.token_hash=$1 AND s.revoked_at IS NULL AND (s.expires_at IS NULL OR s.expires_at>clock_timestamp())
+    AND cr.revoked_at IS NULL AND (cr.expires_at IS NULL OR cr.expires_at>clock_timestamp()) AND p.active AND org.active
+    AND (e.state IN ('draft','ready','running') OR (e.state='closed' AND e.paused_for_edit))
     FOR SHARE OF s,cr,e,p`,
             [digest(raw)],
           )
@@ -127,13 +130,11 @@ export function registerCapture(
         label: z.string().trim().min(2).max(80),
         replace_access_id: uuid.optional(),
         operator_name: z.string().trim().max(120).default(""),
-        expires_at: z.string().datetime({ offset: true }),
+        expires_at: z.string().datetime({ offset: true }).optional(),
       })
       .strict()
       .parse(req.body);
-    const expiry = new Date(input.expires_at);
-    if (expiry.getTime() <= Date.now() || expiry.getTime() > Date.now() + 30 * 86400000)
-      throw new HttpError(422, "INVALID_EXPIRY", "Escolha uma validade futura de até 30 dias");
+    const expiry = null;
     const password = randomBytes(18).toString("base64url"),
       hash = await hashPassword(password),
       code = randomBytes(4).toString("hex").toUpperCase();
@@ -148,7 +149,10 @@ export function registerCapture(
         ).rows[0];
         if (!p) throw new HttpError(404, "NOT_FOUND", "Checkpoint não encontrado ou inativo");
         const event = await eventLock(c, a.organization_id, p.event_id);
-        if (["finalized", "archived"].includes(event.state))
+        if (
+          ["finalized", "archived"].includes(event.state) ||
+          (event.state === "closed" && !event.paused_for_edit)
+        )
           throw new HttpError(409, "EVENT_FINALIZED", "Reabra o evento antes de emitir acesso");
         if (input.replace_access_id) {
           const previous = (
@@ -220,11 +224,13 @@ export function registerCapture(
           await c.query(
             `SELECT cr.password_hash,cr.id,cr.code,cr.label,cr.operator_name,cr.device_id,cr.expires_at,cr.revoked_at,
         d.last_seen_at,d.pending,d.sending,d.synced,d.blocked,
-        (cr.revoked_at IS NULL AND cr.expires_at>clock_timestamp() AND d.last_seen_at>clock_timestamp()-interval '2 minutes'
-        AND EXISTS(SELECT 1 FROM app.checkpoint_sessions s JOIN app.checkpoints p ON p.organization_id=s.organization_id AND p.id=s.checkpoint_id WHERE s.organization_id=cr.organization_id AND s.id=d.session_id AND s.revoked_at IS NULL AND s.expires_at>clock_timestamp() AND p.active)) AS online,
+        (e.state IN ('finalized','archived') OR (e.state='closed' AND NOT e.paused_for_edit)) event_closed,
+        ((e.state IN ('draft','ready','running') OR (e.state='closed' AND e.paused_for_edit)) AND cr.revoked_at IS NULL AND (cr.expires_at IS NULL OR cr.expires_at>clock_timestamp()) AND d.last_seen_at>clock_timestamp()-interval '2 minutes'
+        AND EXISTS(SELECT 1 FROM app.checkpoint_sessions s JOIN app.checkpoints p ON p.organization_id=s.organization_id AND p.id=s.checkpoint_id WHERE s.organization_id=cr.organization_id AND s.id=d.session_id AND s.revoked_at IS NULL AND (s.expires_at IS NULL OR s.expires_at>clock_timestamp()) AND p.active)) AS online,
         d.last_seen_at IS NULL OR d.last_seen_at<clock_timestamp()-interval '2 minutes' AS stale,
-        (SELECT count(*)::int FROM app.checkpoint_sessions cs WHERE cs.credential_id=cr.id AND cs.organization_id=cr.organization_id AND cs.revoked_at IS NULL AND cs.expires_at>now()) active_sessions
+        (SELECT count(*)::int FROM app.checkpoint_sessions cs WHERE cs.credential_id=cr.id AND cs.organization_id=cr.organization_id AND cs.revoked_at IS NULL AND (cs.expires_at IS NULL OR cs.expires_at>now())) active_sessions
         FROM app.checkpoint_credentials cr
+        JOIN app.events e ON e.organization_id=cr.organization_id AND e.id=cr.event_id
         LEFT JOIN app.device_status d ON d.organization_id=cr.organization_id AND d.credential_id=cr.id
         WHERE cr.organization_id=$1 AND cr.checkpoint_id=$2 ORDER BY cr.created_at DESC`,
             [a.organization_id, id],
@@ -323,7 +329,8 @@ export function registerCapture(
               `SELECT cr.* FROM app.checkpoint_credentials cr
     JOIN app.checkpoints p ON p.id=cr.checkpoint_id AND p.organization_id=cr.organization_id
     JOIN app.organizations o ON o.id=cr.organization_id
-    WHERE cr.id=$1 AND cr.revoked_at IS NULL AND cr.expires_at>clock_timestamp() AND p.active AND o.active FOR UPDATE OF cr FOR SHARE OF p`,
+    JOIN app.events e ON e.organization_id=cr.organization_id AND e.id=cr.event_id
+    WHERE cr.id=$1 AND cr.revoked_at IS NULL AND (cr.expires_at IS NULL OR cr.expires_at>clock_timestamp()) AND p.active AND o.active AND (e.state IN ('draft','ready','running') OR (e.state='closed' AND e.paused_for_edit)) FOR UPDATE OF cr FOR SHARE OF p,e`,
               [credential.id],
             )
           ).rows[0];
@@ -344,7 +351,7 @@ export function registerCapture(
           const s = (
             await c.query(
               `INSERT INTO app.checkpoint_sessions(token_hash,organization_id,event_id,checkpoint_id,credential_id,expires_at,operator_name)
-    VALUES($1,$2,$3,$4,$5,LEAST($6,now()+interval '12 hours'),$7) RETURNING id`,
+    VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
               [
                 digest(raw),
                 cr.organization_id,
@@ -379,7 +386,7 @@ export function registerCapture(
         httpOnly: true,
         sameSite: "strict",
         secure: options.secure,
-        maxAge: 12 * 3600,
+        maxAge: 400 * 86400,
       });
       return { csrf_token: csrfFor(raw) };
     },

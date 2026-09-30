@@ -315,9 +315,19 @@ test("Sprint 04: revisão, exportação e conciliação", async (t) => {
           reason: "Fila conferida com operador",
         };
       assert.equal((await admin("POST", base + "/reconciliation", v)).statusCode, 409);
-      await field("POST", "/heartbeat", { pending: 1, sending: 0, synced: 1, blocked: 0 });
+      async function reportBeforeClosing(pending: number) {
+        assert.equal((await transition("running")).statusCode, 200);
+        assert.equal(
+          (await field("POST", "/heartbeat", { pending, sending: 0, synced: 1, blocked: 0 }))
+            .statusCode,
+          200,
+        );
+        assert.equal((await transition("closed")).statusCode, 200);
+        v.expected_version = (await admin("GET", base)).json().version;
+      }
+      await reportBeforeClosing(1);
       assert.equal((await admin("POST", base + "/reconciliation", v)).statusCode, 409);
-      await field("POST", "/heartbeat", { pending: 0, sending: 0, synced: 1, blocked: 0 });
+      await reportBeforeClosing(0);
       assert.equal((await admin("POST", base + "/reconciliation", v)).statusCode, 200);
       assert.equal(
         (await admin("GET", base + "/reconciliation"))
@@ -325,7 +335,7 @@ test("Sprint 04: revisão, exportação e conciliação", async (t) => {
           .items.find((item: { id: string }) => item.id === access.id).reconciled,
         true,
       );
-      await field("POST", "/heartbeat", { pending: 1, sending: 0, synced: 1, blocked: 0 });
+      await reportBeforeClosing(1);
       assert.equal(
         (await admin("GET", base + "/reconciliation"))
           .json()
@@ -337,10 +347,12 @@ test("Sprint 04: revisão, exportação e conciliação", async (t) => {
       "finalização bloqueia pendências; exceção, captura e reabertura auditadas",
       async () => {
         assert.equal((await transition("finalized")).statusCode, 409);
+        assert.equal((await transition("running")).statusCode, 200);
         await field("POST", "/observations/" + obs.id + "/review-requests", {
           request_id: randomUUID(),
           reason: "Verificação final pendente",
         });
+        assert.equal((await transition("closed")).statusCode, 200);
         assert.equal(
           (await transition("finalized", { exception_reason: "Aparelho perdido pela equipe" }))
             .statusCode,
@@ -364,7 +376,7 @@ test("Sprint 04: revisão, exportação e conciliação", async (t) => {
               raw_captured_at: new Date().toISOString(),
             })
           ).statusCode,
-          409,
+          401,
         );
         assert.equal(
           (await admin("POST", base + "/observations/" + obs.id + "/revisions", await revision()))

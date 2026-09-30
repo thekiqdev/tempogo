@@ -537,6 +537,10 @@ function Detail({
               eventId={race.id}
               points={points}
               initialPoint={cpAccess.id}
+              eventClosed={
+                ["finalized", "archived"].includes(race.state) ||
+                (race.state === "closed" && !race.paused_for_edit)
+              }
               onBack={() => setCpAccess(null)}
             />
           ) : (
@@ -647,7 +651,7 @@ function Detail({
                   <dd>
                     {race.laps ?? 1}
                     {(race.laps ?? 1) > 1
-                      ? ` · intervalo mínimo de ${race.min_lap_seconds} segundos`
+                      ? ` · intervalo mínimo de ${((race.min_lap_seconds ?? 60) / 60).toLocaleString("pt-BR", { maximumFractionDigits: 4 })} minutos`
                       : ""}
                   </dd>
                 </div>

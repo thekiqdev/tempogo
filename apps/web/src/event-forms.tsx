@@ -26,7 +26,7 @@ export function EventForm({
   const [values, setValues] = useState({
     name: race?.name ?? "",
     laps: String(race?.laps ?? 1),
-    min_lap_seconds: race ? String(race.min_lap_seconds ?? 60) : "",
+    min_lap_minutes: race ? String((race.min_lap_seconds ?? 60) / 60).replace(".", ",") : "",
     category_name: race?.category_name ?? "Corrida de rua",
     local_date: race?.local_date ?? "",
     location: race?.location ?? "",
@@ -68,11 +68,12 @@ export function EventForm({
         throw Error("Informe de 1 a 999 voltas.");
       if (
         Number(values.laps) > 1 &&
-        (!values.min_lap_seconds ||
-          Number(values.min_lap_seconds) < 11 ||
-          Number(values.min_lap_seconds) > 86400)
+        (!values.min_lap_minutes ||
+          !Number.isFinite(Number(values.min_lap_minutes.replace(",", "."))) ||
+          Math.round(Number(values.min_lap_minutes.replace(",", ".")) * 60) < 11 ||
+          Number(values.min_lap_minutes.replace(",", ".")) > 1440)
       )
-        throw Error("Informe um intervalo entre 11 e 86.400 segundos.");
+        throw Error("Informe um intervalo maior que 10 segundos e de no máximo 1.440 minutos.");
       setError("");
       setStep((v) => v + 1);
     } catch (e) {
@@ -97,7 +98,9 @@ export function EventForm({
           {
             name: values.name.trim(),
             laps: Number(values.laps),
-            min_lap_seconds: Number(values.min_lap_seconds || 60),
+            min_lap_seconds: Math.round(
+              Number((values.min_lap_minutes || "1").replace(",", ".")) * 60,
+            ),
             ...(chips ? { chip_mappings: chips } : {}),
             category_name: values.category_name.trim(),
             local_date: values.local_date,
@@ -201,18 +204,17 @@ export function EventForm({
               </label>
               {Number(values.laps) > 1 && (
                 <label>
-                  Intervalo mínimo entre voltas (segundos)
+                  Intervalo mínimo entre voltas (minutos)
                   <input
-                    name="min_lap_seconds"
-                    inputMode="numeric"
-                    pattern="[0-9]{1,5}"
+                    name="min_lap_minutes"
+                    inputMode="decimal"
                     required
-                    value={values.min_lap_seconds}
+                    value={values.min_lap_minutes}
                     onChange={(e) => {
-                      if (/^\d{0,5}$/.test(e.target.value))
-                        update("min_lap_seconds", e.target.value);
+                      if (/^\d*(?:[.,]\d*)?$/.test(e.target.value))
+                        update("min_lap_minutes", e.target.value);
                     }}
-                    placeholder="Ex.: 300 para 5 minutos"
+                    placeholder="Ex.: 5 ou 2,5"
                   />
                 </label>
               )}
@@ -317,7 +319,7 @@ export function EventForm({
                 <dd>
                   {values.laps}
                   {Number(values.laps) > 1
-                    ? ` · intervalo mínimo de ${values.min_lap_seconds} segundos`
+                    ? ` · intervalo mínimo de ${values.min_lap_minutes} minutos`
                     : ""}
                 </dd>
               </div>

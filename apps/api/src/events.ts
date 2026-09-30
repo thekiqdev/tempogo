@@ -282,7 +282,7 @@ export function registerEvents(
  JOIN app.device_status d ON d.organization_id=cr.organization_id AND d.credential_id=cr.id
  JOIN app.checkpoint_sessions s ON s.organization_id=cr.organization_id AND s.id=d.session_id
  WHERE cr.organization_id=p.organization_id AND cr.checkpoint_id=p.id AND p.active
- AND cr.revoked_at IS NULL AND cr.expires_at>clock_timestamp() AND s.revoked_at IS NULL AND s.expires_at>clock_timestamp()
+ AND EXISTS(SELECT 1 FROM app.events e WHERE e.organization_id=p.organization_id AND e.id=p.event_id AND (e.state IN ('draft','ready','running') OR (e.state='closed' AND e.paused_for_edit))) AND cr.revoked_at IS NULL AND (cr.expires_at IS NULL OR cr.expires_at>clock_timestamp()) AND s.revoked_at IS NULL AND (s.expires_at IS NULL OR s.expires_at>clock_timestamp())
  AND d.last_seen_at>clock_timestamp()-interval '2 minutes') online_devices
  FROM app.checkpoints p WHERE p.organization_id=$1 AND p.event_id=$2 ORDER BY p.sequence`,
             [p.organization_id, eid],
@@ -371,7 +371,7 @@ export function registerEvents(
   async function preparation(c: pg.PoolClient, org: string, event: string) {
     const points = (
       await c.query(
-        `SELECT p.id,p.name,EXISTS(SELECT 1 FROM app.checkpoint_credentials cr WHERE cr.organization_id=p.organization_id AND cr.checkpoint_id=p.id AND cr.revoked_at IS NULL AND cr.expires_at>clock_timestamp()) has_access FROM app.checkpoints p WHERE p.organization_id=$1 AND p.event_id=$2 AND p.active ORDER BY p.sequence`,
+        `SELECT p.id,p.name,EXISTS(SELECT 1 FROM app.checkpoint_credentials cr WHERE cr.organization_id=p.organization_id AND cr.checkpoint_id=p.id AND cr.revoked_at IS NULL AND (cr.expires_at IS NULL OR cr.expires_at>clock_timestamp())) has_access FROM app.checkpoints p WHERE p.organization_id=$1 AND p.event_id=$2 AND p.active ORDER BY p.sequence`,
         [org, event],
       )
     ).rows;

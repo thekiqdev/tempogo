@@ -69,8 +69,13 @@ test("Sprint 02: captura manual, credenciais e concorrência", async (t) => {
     });
   }
   type Identity = { cookie: string; csrf: string; id: string };
-  async function login(code: string, password: string): Promise<Identity> {
+  async function login(
+    code: string,
+    password: string,
+    remoteAddress = "127.0.0.1",
+  ): Promise<Identity> {
     const r = await app.inject({
+      remoteAddress,
       method: "POST",
       url: "/api/v1/field/login",
       headers: { origin },
@@ -265,6 +270,7 @@ test("Sprint 02: captura manual, credenciais e concorrência", async (t) => {
           assert.equal(r.statusCode, 400, r.body);
         }
         const denied = await app.inject({
+          remoteAddress: "127.0.0.2",
           method: "POST",
           url: "/api/v1/field/observations",
           headers: { origin, cookie: one.cookie },
@@ -511,16 +517,46 @@ test("Sprint 02: captura manual, credenciais e concorrência", async (t) => {
         assert.equal((await field(a, "GET", "/me")).statusCode, 401);
       },
     );
-    await t.test("encerramento bloqueia intenção nova, preserva replay já confirmado", async () => {
-      await db.query("UPDATE app.events SET state='closed' WHERE id=$1", [event]);
-      assert.equal(
-        (await field(one, "POST", "/observations", { ...payload, client_event_id: randomUUID() }))
-          .statusCode,
-        409,
-      );
-      assert.equal((await field(one, "POST", "/observations", payload)).statusCode, 200);
-      await db.query("UPDATE app.events SET state='running' WHERE id=$1", [event]);
-    });
+    await t.test(
+      "acesso sem validade, pausa preserva sessão e encerramento bloqueia entrada",
+      async () => {
+        const created = await admin("POST", "/checkpoints/" + cp + "/access", {
+          label: "Até encerrar",
+        });
+        assert.equal(created.statusCode, 201, created.body);
+        assert.equal(created.json().expires_at, null);
+        const device = await login(created.json().code, created.json().password, "127.0.0.2");
+        assert.equal((await field(device, "GET", "/me")).json().expires_at, null);
+        await db.query("UPDATE app.events SET state='closed',paused_for_edit=true WHERE id=$1", [
+          event,
+        ]);
+        assert.equal((await field(device, "GET", "/me")).statusCode, 200);
+        await db.query("UPDATE app.events SET paused_for_edit=false WHERE id=$1", [event]);
+        assert.equal((await field(device, "GET", "/me")).statusCode, 401);
+        assert.equal((await field(one, "POST", "/observations", payload)).statusCode, 401);
+        const denied = await app.inject({
+          remoteAddress: "127.0.0.2",
+          method: "POST",
+          url: "/api/v1/field/login",
+          headers: { origin },
+          payload: { code: created.json().code, operator_name: "Operador" },
+        });
+        assert.equal(denied.statusCode, 401, denied.body);
+        const row = (await admin("GET", "/checkpoints/" + cp + "/access"))
+          .json()
+          .items.find((i: { id: string }) => i.id === created.json().id);
+        assert.equal(row.event_closed, true);
+        assert.equal(row.access_url, null);
+        assert.equal(row.online, false);
+        assert.equal(
+          (await admin("POST", "/checkpoints/" + cp + "/access", { label: "Encerrado" }))
+            .statusCode,
+          409,
+        );
+        await db.query("UPDATE app.events SET state='running' WHERE id=$1", [event]);
+        assert.equal((await field(device, "GET", "/me")).statusCode, 200);
+      },
+    );
     await t.test("expiração e revogação impedem a próxima chamada e novo login", async () => {
       await db.query(
         "UPDATE app.checkpoint_sessions SET expires_at=now()-interval '1 second' WHERE id=$1",
@@ -552,9 +588,8 @@ test("Sprint 02: captura manual, credenciais e concorrência", async (t) => {
         const previous = create.json();
         const device = await login(previous.code, previous.password);
         const invalid = await admin("POST", "/checkpoints/" + cp + "/access", {
-          label: "Replacement test",
+          label: "X",
           replace_access_id: previous.id,
-          expires_at: new Date(Date.now() - 3600000).toISOString(),
         });
         assert.equal(invalid.statusCode, 422);
         assert.equal((await field(device, "GET", "/me")).statusCode, 200);

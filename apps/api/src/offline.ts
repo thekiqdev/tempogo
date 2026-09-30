@@ -14,7 +14,7 @@ export type FieldScope = {
   checkpoint_id: string;
   credential_id: string;
   device_id: string;
-  expires_at: Date;
+  expires_at: Date | null;
   state: string;
 };
 type Context = <T>(

@@ -133,7 +133,7 @@ test("Sprint 03: concessões, sincronização e recuperação", async (t) => {
       const prepared = await field(one, "POST", "/prepare", {});
       assert.equal(prepared.statusCode, 200, prepared.body);
       grant = prepared.json().grant;
-      assert.ok(Date.parse(grant.expires_at) - Date.now() <= 3600000);
+      assert.ok(Date.parse(grant.expires_at) - Date.now() <= 2 * 3600000);
       const time = await field(one, "GET", "/time");
       assert.equal(time.statusCode, 200);
       assert.ok(Date.parse(time.json().server_time));
@@ -220,7 +220,7 @@ test("Sprint 03: concessões, sincronização e recuperação", async (t) => {
       assert.equal(r.json().needs_review, true);
     });
     await t.test(
-      "fechado recebe em revisão; reabertura não valida automaticamente janela anterior",
+      "encerramento bloqueia envio; reabertura não valida automaticamente janela anterior",
       async () => {
         await db.query("UPDATE app.events SET state='closed' WHERE id=$1", [event]);
         await db.query(
@@ -228,8 +228,7 @@ test("Sprint 03: concessões, sincronização e recuperação", async (t) => {
           [event],
         );
         const r = await field(two, "POST", "/sync", body("888"));
-        assert.equal(r.statusCode, 201, r.body);
-        assert.equal(r.json().needs_review, true);
+        assert.equal(r.statusCode, 401, r.body);
         await db.query("UPDATE app.events SET state='running' WHERE id=$1", [event]);
         await db.query(
           "INSERT INTO app.capture_windows(organization_id,event_id,opened_at,reason) VALUES($1,$2,now(),'reopen test')",

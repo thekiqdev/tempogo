@@ -14,7 +14,8 @@ type Access = {
   blocked?: number | null;
   stale?: boolean;
   active_sessions?: number;
-  expires_at: string;
+  expires_at: string | null;
+  event_closed?: boolean;
   revoked_at: string | null;
   online?: boolean;
   password?: string;
@@ -137,11 +138,13 @@ export function AccessPanel({
   eventId,
   points,
   initialPoint,
+  eventClosed = false,
   onBack,
 }: {
   eventId: string;
   points: Checkpoint[];
   initialPoint?: string;
+  eventClosed?: boolean;
   onBack?: () => void;
 }) {
   const [point, setPoint] = useState(initialPoint ?? points[0]?.id ?? ""),
@@ -154,7 +157,6 @@ export function AccessPanel({
     [showHistory, setShowHistory] = useState(false),
     [operator, setOperator] = useState("");
   const [label, setLabel] = useState(""),
-    [expiry, setExpiry] = useState(""),
     [replacing, setReplacing] = useState<Access | null>(null),
     [revoking, setRevoking] = useState<Access | null>(null);
   const [live, setLive] = useState(false);
@@ -203,7 +205,6 @@ export function AccessPanel({
     setCreating(false);
     setOperator("");
     setLabel("");
-    setExpiry("");
   }
   function prepareReplacement(access: Access) {
     setCreating(false);
@@ -213,12 +214,6 @@ export function AccessPanel({
     setIssued(null);
     setError("");
     setRevoking(null);
-    const date = new Date(access.expires_at);
-    setExpiry(
-      date.getTime() > Date.now()
-        ? new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
-        : "",
-    );
   }
   async function refresh() {
     if (point)
@@ -277,7 +272,6 @@ export function AccessPanel({
         label: data.get("label"),
         operator_name: operator,
         ...(replacing ? { replace_access_id: replacing.id } : {}),
-        expires_at: new Date(String(data.get("expires_at"))).toISOString(),
       });
       setIssued(generated);
       setIssuedAnchor(replacing?.id ?? null);
@@ -312,7 +306,7 @@ export function AccessPanel({
     <form ref={form} onSubmit={issue} className="panel access-create-form">
       <h3>{replacing ? "Redefinir acesso" : "Novo aparelho na equipe"}</h3>
       <p className="muted access-form-intro">
-        Informe quem vai registrar as passagens e até quando poderá acessar.
+        Identifique o aparelho e o operador. O acesso fica disponível até o encerramento do evento.
       </p>
       {replacing && (
         <p className="next-hint">
@@ -345,23 +339,15 @@ export function AccessPanel({
           placeholder="Ex.: Celular 01 · faixa esquerda"
         />
       </label>
-      <label>
-        Válido até
-        <input
-          name="expires_at"
-          type="datetime-local"
-          required
-          value={expiry}
-          disabled={busy}
-          onChange={(e) => setExpiry(e.target.value)}
-        />
-      </label>
       {replacing && error && (
         <p role="alert" className="error">
           {error}
         </p>
       )}
-      <button className="primary" disabled={busy || !points.find((p) => p.id === point)?.active}>
+      <button
+        className="primary"
+        disabled={busy || eventClosed || !points.find((p) => p.id === point)?.active}
+      >
         {busy ? "Salvando…" : replacing ? "Revogar e gerar novo acesso" : "Gerar acesso"}
       </button>
       {(creating || replacing) && (
@@ -393,7 +379,7 @@ export function AccessPanel({
           disabled={busy}
           onClick={() => {
             if (
-              (issued || label || expiry || operator) &&
+              (issued || label || operator) &&
               !window.confirm("Voltar? Guarde o código gerado; dados não salvos serão descartados.")
             )
               return;
@@ -432,7 +418,7 @@ export function AccessPanel({
                 onClick={() => {
                   if (
                     p.id !== point &&
-                    (issued || label || expiry || operator) &&
+                    (issued || label || operator) &&
                     !window.confirm(
                       "Trocar de checkpoint? Guarde o código e confira os dados não salvos antes de continuar.",
                     )
@@ -463,14 +449,9 @@ export function AccessPanel({
         <div>
           <h2>Acessos da equipe</h2>
           <p>
-            {items.filter((i) => !i.revoked_at && Date.parse(i.expires_at) > Date.now()).length}{" "}
-            ativos ·{" "}
-            {
-              items.filter(
-                (i) => i.online && !i.revoked_at && Date.parse(i.expires_at) > Date.now(),
-              ).length
-            }{" "}
-            online <span className="access-count-divider">/</span> {items.length} cadastrados
+            {items.filter((i) => !i.revoked_at && !i.event_closed).length} ativos ·{" "}
+            {items.filter((i) => i.online && !i.revoked_at && !i.event_closed).length} online{" "}
+            <span className="access-count-divider">/</span> {items.length} cadastrados
           </p>
         </div>
         <HeaderActions>
@@ -479,7 +460,7 @@ export function AccessPanel({
           </button>
           <button
             className="primary"
-            disabled={busy || !points.find((p) => p.id === point)?.active}
+            disabled={busy || eventClosed || !points.find((p) => p.id === point)?.active}
             onClick={() => {
               resetForm();
               setCreating(true);
@@ -503,7 +484,12 @@ export function AccessPanel({
       {!points.find((p) => p.id === point)?.active && (
         <p className="next-hint">Checkpoint inativo. Ative-o para criar acessos.</p>
       )}
-      {point && !loading && !replacing && (creating || (!items.length && !issued)) && accessForm}
+      {point &&
+        !eventClosed &&
+        !loading &&
+        !replacing &&
+        (creating || (!items.length && !issued)) &&
+        accessForm}
       {error && !replacing && (
         <p role="alert" className="error">
           {error}
@@ -518,7 +504,7 @@ export function AccessPanel({
             checked={showHistory}
             onChange={(e) => setShowHistory(e.target.checked)}
           />{" "}
-          Mostrar expirados e revogados
+          Mostrar encerrados e revogados
         </label>
       </div>
       {loading && <p role="status">Carregando acessos…</p>}
@@ -531,9 +517,11 @@ export function AccessPanel({
       {!loading &&
         items.length > 0 &&
         !showHistory &&
-        !items.some((i) => !i.revoked_at && Date.parse(i.expires_at) > Date.now()) && (
+        !items.some((i) => !i.revoked_at && !i.event_closed) && (
           <p className="empty">
-            Nenhum acesso ativo. Crie um novo acesso ou consulte os expirados e revogados.
+            {eventClosed
+              ? "Evento encerrado. Os acessos ficam bloqueados até a reabertura."
+              : "Nenhum acesso ativo. Crie um novo acesso ou consulte os revogados."}
           </p>
         )}
       {revoking && (
@@ -556,7 +544,7 @@ export function AccessPanel({
           .map((i) =>
             issued && issuedAnchor === i.id ? { ...issued, slotId: i.id } : { ...i, slotId: i.id },
           )
-          .filter((i) => showHistory || (!i.revoked_at && Date.parse(i.expires_at) > Date.now()))
+          .filter((i) => showHistory || !i.revoked_at)
           .map((i) => (
             <li
               key={i.slotId}
@@ -573,29 +561,16 @@ export function AccessPanel({
                   </span>
                   <strong>{i.label}</strong>
                   <div className="access-status-badges">
-                    <span
-                      className={
-                        "badge " +
-                        (!i.revoked_at && Date.parse(i.expires_at) > Date.now() ? "active" : "")
-                      }
-                    >
-                      {i.revoked_at
-                        ? "Revogado"
-                        : Date.parse(i.expires_at) <= Date.now()
-                          ? "Expirado"
-                          : "Ativo"}
+                    <span className={"badge " + (!i.revoked_at && !i.event_closed ? "active" : "")}>
+                      {i.revoked_at ? "Revogado" : i.event_closed ? "Evento encerrado" : "Ativo"}
                     </span>
                     <span
                       className={
                         "badge access-presence-badge " +
-                        (i.online && !i.revoked_at && Date.parse(i.expires_at) > Date.now()
-                          ? "is-online"
-                          : "")
+                        (i.online && !i.revoked_at && !i.event_closed ? "is-online" : "")
                       }
                     >
-                      {i.online && !i.revoked_at && Date.parse(i.expires_at) > Date.now()
-                        ? "● Online"
-                        : "○ Offline"}
+                      {i.online && !i.revoked_at && !i.event_closed ? "● Online" : "○ Offline"}
                     </span>
                   </div>
                 </div>
@@ -609,13 +584,8 @@ export function AccessPanel({
                     <CopyButton value={i.code} label={"Copiar código de " + i.label} />
                   </p>
                   <p>
-                    <small>Válido até</small>
-                    <strong>
-                      {new Date(i.expires_at).toLocaleString("pt-BR", {
-                        dateStyle: "short",
-                        timeStyle: "short",
-                      })}
-                    </strong>
+                    <small>Disponibilidade</small>
+                    <strong>Até encerrar o evento</strong>
                   </p>
                 </div>
                 {i.access_url && (
@@ -650,7 +620,7 @@ export function AccessPanel({
                   <div className="access-actions">
                     <button
                       className="secondary"
-                      disabled={busy || !points.find((p) => p.id === point)?.active}
+                      disabled={busy || eventClosed || !points.find((p) => p.id === point)?.active}
                       onClick={() => prepareReplacement(i)}
                     >
                       Redefinir acesso
