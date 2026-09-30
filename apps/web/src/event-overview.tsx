@@ -79,7 +79,7 @@ export function EventOverview({
       description: "Todos os checkpoints ativos têm acesso válido.",
       pending: preparation?.missing_access.length
         ? "Crie acesso para: " + preparation.missing_access.map((p) => p.name).join(", ") + "."
-        : "Crie um código e senha por aparelho, em cada checkpoint ativo.",
+        : "Crie um código de acesso por aparelho, em cada checkpoint ativo.",
       action: "Configurar equipe",
       tab: "access",
     },

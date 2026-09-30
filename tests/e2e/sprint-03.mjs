@@ -110,10 +110,9 @@ try {
         .toISOString()
         .slice(0, 16),
     );
-  await page.getByRole("button", { name: "Gerar código e senha" }).click();
+  await page.getByRole("button", { name: "Gerar acesso" }).click();
   const code = await page.getByTestId("issued-code").innerText();
-  const secret = await page.getByTestId("issued-password").innerText();
-  await page.getByRole("button", { name: "Já guardei a senha" }).click();
+  await page.getByRole("button", { name: "Concluir" }).click();
   await page.screenshot({ path: folder + "/access.png", fullPage: true });
   const operator = await browser.newContext({
     ignoreHTTPSErrors: base === "https://localhost:5443",
@@ -122,8 +121,8 @@ try {
   const field = await operator.newPage();
   field.on("pageerror", (e) => errors.push(e.message));
   await field.goto(base + "/checkpoint");
-  await field.getByLabel("Código do checkpoint").fill(code);
-  await field.getByLabel("Senha do checkpoint").fill(secret);
+  await field.getByLabel("Código de acesso").fill(code);
+  await field.getByLabel("Operador", { exact: true }).fill("Operador de teste");
   await field.getByRole("button", { name: "Entrar no checkpoint" }).click();
   await expect(field.getByRole("heading", { name: "Capturar", exact: true })).toBeVisible();
   const fieldCookie = (await operator.cookies()).find((c) => c.name === "cc_checkpoint");

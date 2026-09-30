@@ -4327,3 +4327,285 @@ p {
   border: 1px solid #9edbb4;
   font-weight: 750;
 }
+
+/* Passage management: compact rows on desktop, readable cards on mobile. */
+.passages-workspace {
+  min-width: 0;
+}
+.passages-heading h2 {
+  margin: 0;
+  font-size: 23px;
+}
+.passages-heading p {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: #647882;
+}
+.passages-explainer {
+  font-size: 12px;
+  color: #56706b;
+  margin: 12px 0 18px;
+}
+.passages-explainer summary {
+  cursor: pointer;
+}
+.passages-explainer p {
+  max-width: 720px;
+  line-height: 1.6;
+}
+.passages-workspace .review-filters {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  padding: 20px;
+  border-radius: 14px;
+}
+.passages-workspace .review-filters label {
+  min-width: 0;
+  margin: 0;
+  font-size: 12px;
+}
+.passages-workspace .review-filters input,
+.passages-workspace .review-filters select {
+  min-width: 0;
+  width: 100%;
+  font-size: 13px;
+}
+.passages-workspace .review-filters > button {
+  align-self: end;
+}
+.passages-results-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 20px 0 14px;
+}
+.passages-results-bar > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.passages-results-bar strong {
+  font-size: 14px;
+  margin-right: 8px;
+}
+.passages-grid-labels,
+.passages-workspace .passage-list > li {
+  display: grid;
+  grid-template-columns: minmax(70px, 0.65fr) minmax(150px, 1.7fr) minmax(155px, 1.6fr) minmax(
+      110px,
+      1fr
+    ) 80px;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+}
+.passages-grid-labels {
+  background: #eaf0f2;
+  border-radius: 12px 12px 0 0;
+  font-size: 11px;
+  font-weight: 700;
+  color: #5b717c;
+}
+.passages-workspace .passage-list {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+  border: 1px solid #dde6e9;
+  border-radius: 0 0 12px 12px;
+  overflow: hidden;
+  background: #fff;
+}
+.passages-workspace .passage-list > li {
+  border-bottom: 1px solid #e8edef;
+}
+.passages-workspace .passage-list > li:last-child {
+  border-bottom: 0;
+}
+.passages-workspace .passage-list > li:hover {
+  background: #f8fbfa;
+}
+.passages-workspace .passage-list .passage-bib {
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+  color: #126b59;
+  overflow-wrap: anywhere;
+}
+.passages-workspace .passage-origin,
+.passages-workspace .passage-times {
+  min-width: 0;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.passages-workspace .passage-list small {
+  display: block;
+  color: #6b7f89;
+  font-size: 11px;
+  line-height: 1.5;
+  margin-top: 3px;
+}
+.passage-status {
+  display: inline-block;
+  width: fit-content;
+  font-size: 11px;
+  padding: 5px 9px;
+  border-radius: 7px;
+  font-weight: 600;
+}
+.passage-status.accepted {
+  color: #146c4d;
+  background: #e4f4ec;
+}
+.passage-status.pending {
+  color: #866010;
+  background: #fff4da;
+}
+.passage-status.invalidated {
+  color: #905858;
+  background: #f6eaea;
+}
+.passages-workspace .passage-review {
+  font-size: 12px;
+  padding: 8px 12px;
+  min-height: 40px;
+}
+.passages-workspace .passage-evidence {
+  grid-column: 2 / -1;
+  font-size: 12px;
+}
+.passages-workspace .passage-evidence summary {
+  color: #146c59;
+  cursor: pointer;
+}
+.passages-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 18px 0;
+  font-size: 12px;
+  color: #617883;
+}
+.passages-pagination label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 12px;
+}
+.passages-pagination select {
+  width: 72px;
+  padding: 8px;
+}
+.passages-pagination > div {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.passages-pagination button {
+  min-height: 40px;
+  font-size: 12px;
+}
+@media (max-width: 1100px) {
+  .passages-grid-labels {
+    display: none;
+  }
+  .passages-workspace .passage-list > li {
+    grid-template-columns: 70px minmax(0, 1fr) auto;
+  }
+  .passage-times {
+    grid-column: 2;
+  }
+  .passage-status {
+    grid-column: auto;
+  }
+  .passage-review {
+    grid-column: 3;
+    grid-row: 1;
+  }
+  .passages-workspace .passage-list {
+    border-radius: 12px;
+  }
+}
+@media (max-width: 700px) {
+  .passages-heading {
+    align-items: flex-start;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .passages-heading h2 {
+    font-size: 21px;
+  }
+  .passages-workspace .review-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 16px;
+    gap: 12px;
+  }
+  .passages-workspace .review-filters > button {
+    grid-column: 1 / -1;
+  }
+  .passages-results-bar {
+    flex-wrap: wrap;
+  }
+  .passages-workspace .passage-list {
+    border: 0;
+    background: transparent;
+    display: grid;
+    gap: 10px;
+  }
+  .passages-workspace .passage-list > li {
+    grid-template-columns: 55px minmax(0, 1fr) auto;
+    border: 1px solid #dde6e9;
+    border-radius: 12px;
+    background: white;
+    padding: 14px;
+    gap: 10px;
+  }
+  .passages-workspace .passage-times {
+    grid-column: 2 / -1;
+  }
+  .passages-workspace .passage-status {
+    grid-column: 2 / -1;
+  }
+  .passages-workspace .passage-evidence {
+    grid-column: 1 / -1;
+  }
+  .passages-pagination > div {
+    width: 100%;
+    justify-content: space-between;
+    gap: 6px;
+  }
+}
+
+.passages-export-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  justify-content: space-between;
+  margin: 0 0 14px;
+  font-size: 11px;
+  color: #647882;
+}
+.passages-export-note .text-button {
+  font-size: 12px;
+}
+
+.operator-nav {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.record-support {
+  margin: 12px 0;
+  font-size: 13px;
+}
+.record-support summary {
+  cursor: pointer;
+  color: #146c59;
+  padding: 10px 0;
+}
+.record-support button {
+  margin: 4px 8px 4px 0;
+}

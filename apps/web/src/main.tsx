@@ -991,7 +991,7 @@ createRoot(root).render(
   <StrictMode>
     {location.pathname.startsWith("/plataforma") ? (
       <PlatformApp />
-    ) : location.pathname === "/checkpoint" ? (
+    ) : location.pathname === "/checkpoint" || location.pathname.startsWith("/evento/") ? (
       <FieldApp />
     ) : (
       <App />

@@ -207,7 +207,7 @@ try {
     .fill(
       new Date(future.getTime() - future.getTimezoneOffset() * 60000).toISOString().slice(0, 16),
     );
-  await page.getByRole("button", { name: "Gerar código e senha", exact: true }).click();
+  await page.getByRole("button", { name: "Gerar acesso", exact: true }).click();
   await expect(page.getByTestId("issued-code")).toHaveText("CODE0");
   await page.getByRole("button", { name: "Copiar código", exact: true }).click();
   expect(await page.evaluate(() => window.__copiedAccess)).toBe("CODE0");
@@ -215,9 +215,8 @@ try {
   expect(await page.evaluate(() => window.__copiedAccess)).toContain(
     "/checkpoint#access=fixture-0",
   );
-  await page.getByRole("button", { name: "Copiar senha", exact: true }).click();
-  expect(await page.evaluate(() => window.__copiedAccess)).toBe("Generated-Test-Password");
-  await page.getByRole("button", { name: "Já guardei a senha" }).click();
+  await expect(page.getByRole("button", { name: "Copiar senha", exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Concluir" }).click();
   await page.getByRole("button", { name: "Redefinir acesso", exact: true }).click();
   await expect(page.locator(".access-list li .access-create-form")).toBeVisible();
   await expect(page.locator(".checkpoint-access-panel > .access-create-form")).toHaveCount(0);
@@ -229,7 +228,7 @@ try {
   expect(await page.evaluate(() => window.__copiedAccess)).toBe("CODE1");
   await capture("acesso-nova-senha-no-card");
   expect(accesses[0].revoked_at).not.toBeNull();
-  await page.getByRole("button", { name: "Já guardei a senha" }).click();
+  await page.getByRole("button", { name: "Concluir" }).click();
   await page.getByRole("button", { name: "Revogar acesso", exact: true }).click();
   await page.getByRole("button", { name: "Confirmar revogação", exact: true }).click();
   await expect(page.getByRole("button", { name: "Revogar acesso", exact: true })).toHaveCount(0);
@@ -305,8 +304,8 @@ try {
       .fill(
         new Date(future.getTime() - future.getTimezoneOffset() * 60000).toISOString().slice(0, 16),
       );
-    await page.getByRole("button", { name: "Gerar código e senha", exact: true }).click();
-    await page.getByRole("button", { name: "Já guardei a senha" }).click();
+    await page.getByRole("button", { name: "Gerar acesso", exact: true }).click();
+    await page.getByRole("button", { name: "Concluir" }).click();
   }
   await expect(page.locator(".access-list li")).toHaveCount(2);
   await expect(page.locator(".access-list")).toContainText("Ana Souza");

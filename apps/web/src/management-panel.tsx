@@ -68,6 +68,7 @@ const local = (s: string) =>
 export function ObservationPanel({ eventId, points }: { eventId: string; points: Checkpoint[] }) {
   const [query, setQuery] = useState("view=consolidated"),
     [offset, setOffset] = useState(0),
+    [pageSize, setPageSize] = useState(20),
     [data, setData] = useState<Result | null>(null),
     [detail, setDetail] = useState<Detail | null>(null),
     [error, setError] = useState(""),
@@ -82,14 +83,17 @@ export function ObservationPanel({ eventId, points }: { eventId: string; points:
   const attempt = useRef<{ key: string; id: string } | null>(null);
   const path = "/events/" + eventId + "/observations";
   async function refresh() {
-    setData(await api<Result>(path + "?" + query + "&limit=50&offset=" + offset));
+    setData(await api<Result>(path + "?" + query + "&limit=" + pageSize + "&offset=" + offset));
   }
   useEffect(() => {
     let active = true;
     const load = () =>
-      api<Result>(path + "?" + query + "&limit=50&offset=" + offset)
+      api<Result>(path + "?" + query + "&limit=" + pageSize + "&offset=" + offset)
         .then((r) => {
-          if (active) setData(r);
+          if (active) {
+            setData(r);
+            setError("");
+          }
         })
         .catch((e) => {
           if (active) setError(e.message);
@@ -100,7 +104,7 @@ export function ObservationPanel({ eventId, points }: { eventId: string; points:
       active = false;
       clearInterval(timer);
     };
-  }, [path, query, offset]);
+  }, [path, query, offset, pageSize]);
   function filter(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const f = new FormData(e.currentTarget),
@@ -110,6 +114,7 @@ export function ObservationPanel({ eventId, points }: { eventId: string; points:
       if (value) q.set(key, ["from", "to"].includes(key) ? new Date(value).toISOString() : value);
     }
     setOffset(0);
+    setData(null);
     setQuery(q.toString());
   }
   async function open(id: string) {
@@ -149,10 +154,10 @@ export function ObservationPanel({ eventId, points }: { eventId: string; points:
       setBusy(false);
     }
   }
-  async function download() {
+  async function download(format: "txt" | "csv" = "txt") {
     setBusy(true);
     try {
-      const r = await fetch("/api/v1" + path + ".csv?" + query, {
+      const r = await fetch("/api/v1" + path + "." + format + "?" + query, {
         credentials: "same-origin",
         cache: "no-store",
       });
@@ -160,7 +165,7 @@ export function ObservationPanel({ eventId, points }: { eventId: string; points:
       const url = URL.createObjectURL(await r.blob()),
         a = document.createElement("a");
       a.href = url;
-      a.download = "passagens.csv";
+      a.download = "passagens." + format;
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) {
@@ -170,18 +175,23 @@ export function ObservationPanel({ eventId, points }: { eventId: string; points:
     }
   }
   return (
-    <section>
-      <div className="section-title">
-        <h2>Passagens manuais</h2>
+    <section className="passages-workspace">
+      <div className="section-title passages-heading">
+        <div>
+          <h2>Passagens manuais</h2>
+          <p>Acompanhe os registros e revise quando necessário.</p>
+        </div>
         <button className="secondary" onClick={() => refresh().catch((e) => setError(e.message))}>
           Atualizar passagens
         </button>
       </div>
-      <p className="next-hint">
-        A visão consolidada considera a primeira captura de cada grupo de até 5 segundos para o
-        mesmo número e checkpoint. Registros originais são preservados. Horários com sinalizações
-        continuam sujeitos à revisão.
-      </p>
+      <details className="passages-explainer">
+        <summary>Como funciona o agrupamento?</summary>
+        <p>
+          Para o mesmo número e checkpoint, registros em até 5 segundos são agrupados pela primeira
+          captura. Os originais e a opção de revisão permanecem disponíveis.
+        </p>
+      </details>
       <form className="review-filters panel" onSubmit={filter}>
         <label>
           Visualização
@@ -231,80 +241,147 @@ export function ObservationPanel({ eventId, points }: { eventId: string; points:
           {error}
         </p>
       )}
-      {data && (
-        <p role="status">
-          {data.total} passagens · {data.pending} pendentes · {data.invalidated} invalidadas ·
-          Atualizado: {stamp(data.updated_at)} · Atualização a cada 15 segundos.
-        </p>
-      )}
-      <button className="secondary" disabled={busy} onClick={download}>
-        Exportar CSV filtrado
-      </button>
-      <p className="footnote">
-        Importe a coluna effective_bib como texto para preservar zeros à esquerda. Horários no CSV
-        em UTC; o fuso do evento acompanha cada linha. Não representa resultado oficial.
-      </p>
+      <div className="passages-results-bar">
+        <div role="status">
+          {data ? (
+            <>
+              <strong>{data.total} passagens</strong>
+              <span className="passage-status pending">{data.pending} pendentes</span>
+              <span className="passage-status invalidated">{data.invalidated} invalidadas</span>
+            </>
+          ) : (
+            "Carregando passagens…"
+          )}
+        </div>
+        <button className="secondary" disabled={busy || !data} onClick={() => download("txt")}>
+          Exportar TXT
+        </button>
+      </div>
+      <div className="passages-export-note">
+        <span>
+          TXT: número com 24 posições; data e hora com milissegundos no fuso do evento. Respeita os
+          filtros e a visualização selecionada.
+        </span>
+        <button className="text-button" disabled={busy || !data} onClick={() => download("csv")}>
+          Exportar CSV detalhado
+        </button>
+      </div>
+      <div className="passages-grid-labels" aria-hidden="true">
+        <span>Número</span>
+        <span>Checkpoint / origem</span>
+        <span>Captura / recebimento</span>
+        <span>Situação</span>
+        <span>Ações</span>
+      </div>
       <ul className="passage-list">
         {data?.items.map((i) => (
           <li key={i.id}>
-            <strong>{i.effective_bib}</strong>
-            <div>
+            <strong className="passage-bib">{i.effective_bib}</strong>
+            <div className="passage-origin">
               <b>{i.checkpoint_name}</b>
-              <small>
-                Origem: {i.operator_name ? i.operator_name + " · " : ""}
-                {i.access_label || "Aparelho não informado"}
-              </small>
+              <small>{i.operator_name || "Operador não informado"}</small>
+              <small>{i.access_label || "Aparelho não informado"}</small>
               {(i.observation_count ?? 1) > 1 && (
                 <strong className="consolidation-count">
-                  Primeira captura · {i.observation_count} registros agrupados
+                  {i.observation_count} registros agrupados
                 </strong>
               )}
-              <small>
-                Captura: {stamp(i.effective_captured_at)} · Recebimento: {stamp(i.received_at)}
-              </small>
-              <span>
-                {statusLabel[i.status]} · versão {i.version}
-              </span>
             </div>
-            <div className="passage-actions">
-              <button className="secondary" onClick={() => open(i.id)}>
-                Revisar {i.effective_bib}
-              </button>
-              {(i.members?.length ?? 0) > 1 && (
-                <details className="passage-evidence">
-                  <summary>Ver registros do grupo</summary>
-                  {i.members!.map((m, index) => (
-                    <article key={m.id}>
-                      <strong>{index === 0 ? "Primeira captura" : "Registro adicional"}</strong>
-                      <p>
-                        {m.operator_name ? m.operator_name + " · " : ""}
-                        {m.access_label}
-                      </p>
-                      <p>{stamp(m.effective_captured_at)}</p>
-                      <button className="secondary" onClick={() => open(m.id)}>
-                        Revisar este registro
-                      </button>
-                    </article>
-                  ))}
-                </details>
-              )}
+            <div className="passage-times">
+              <time dateTime={i.effective_captured_at}>{stamp(i.effective_captured_at)}</time>
+              <small>Recebido: {stamp(i.received_at)}</small>
             </div>
+            <span className={"passage-status " + i.status}>{statusLabel[i.status]}</span>
+            <button
+              className="secondary passage-review"
+              aria-label={"Revisar " + i.effective_bib}
+              onClick={() => open(i.id)}
+            >
+              Revisar
+            </button>
+            {(i.members?.length ?? 0) > 1 && (
+              <details className="passage-evidence">
+                <summary>Ver registros do grupo</summary>
+                {i.members!.map((m, index) => (
+                  <article key={m.id}>
+                    <strong>{index === 0 ? "Primeira captura" : "Registro adicional"}</strong>
+                    <p>
+                      {m.operator_name ? m.operator_name + " · " : ""}
+                      {m.access_label}
+                    </p>
+                    <p>{stamp(m.effective_captured_at)}</p>
+                    <button className="secondary" onClick={() => open(m.id)}>
+                      Revisar este registro
+                    </button>
+                  </article>
+                ))}
+              </details>
+            )}
           </li>
         ))}
       </ul>
-      {data?.total === 0 && <p className="empty">Nenhuma passagem encontrada.</p>}
-      <div className="section-title">
-        <button disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - 50))}>
-          Anterior
-        </button>
-        <span>Página {offset / 50 + 1}</span>
-        <button
-          disabled={!data || offset + 50 >= data.total}
-          onClick={() => setOffset(offset + 50)}
-        >
-          Próxima
-        </button>
-      </div>
+      {data?.total === 0 && (
+        <p className="empty">
+          Nenhuma passagem encontrada. Ajuste os filtros para tentar novamente.
+        </p>
+      )}
+      <nav className="passages-pagination" aria-label="Paginação das passagens">
+        <label>
+          Por página
+          <select
+            value={pageSize}
+            onChange={(e) => {
+              setPageSize(Number(e.target.value));
+              setOffset(0);
+              setData(null);
+            }}
+          >
+            {[10, 20, 50].map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
+        </label>
+        <span>
+          {data
+            ? data.total
+              ? `${offset + 1}–${Math.min(offset + pageSize, data.total)} de ${data.total}`
+              : "0 resultados"
+            : "Carregando…"}
+        </span>
+        <div>
+          <button
+            className="secondary"
+            disabled={!data || offset === 0}
+            onClick={() => {
+              setOffset(Math.max(0, offset - pageSize));
+              setData(null);
+            }}
+          >
+            Anterior
+          </button>
+          <span>
+            Página {Math.floor(offset / pageSize) + 1}
+            {data ? " de " + Math.max(1, Math.ceil(data.total / pageSize)) : ""}
+          </span>
+          <button
+            className="secondary"
+            disabled={!data || offset + pageSize >= data.total}
+            onClick={() => {
+              setOffset(offset + pageSize);
+              setData(null);
+            }}
+          >
+            Próxima
+          </button>
+        </div>
+      </nav>
+      <p className="footnote">
+        {data && <>Atualizado às {new Date(data.updated_at).toLocaleTimeString("pt-BR")} · </>}
+        Atualização automática a cada 15 segundos. CSV em UTC; preserve o número como texto ao
+        importar. Não representa resultado oficial.
+      </p>
       {detail && (
         <section ref={reviewPanel} tabIndex={-1} className="panel" aria-label="Revisão da passagem">
           <div className="section-title">

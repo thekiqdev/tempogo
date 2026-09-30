@@ -315,9 +315,9 @@ export function AccessPanel({
       </p>
       {replacing && (
         <p className="next-hint">
-          Ao confirmar, o código e a senha anteriores de <strong>{replacing.label}</strong> serão
+          Ao confirmar, o código e o link anteriores de <strong>{replacing.label}</strong> serão
           revogados. Sincronize registros pendentes no aparelho antes de continuar. Um novo código e
-          senha serão gerados.
+          link serão gerados.
         </p>
       )}
       <label>
@@ -361,7 +361,7 @@ export function AccessPanel({
         </p>
       )}
       <button className="primary" disabled={busy || !points.find((p) => p.id === point)?.active}>
-        {busy ? "Salvando…" : replacing ? "Revogar e gerar novo acesso" : "Gerar código e senha"}
+        {busy ? "Salvando…" : replacing ? "Revogar e gerar novo acesso" : "Gerar acesso"}
       </button>
       {(creating || replacing) && (
         <button type="button" className="secondary" disabled={busy} onClick={resetForm}>
@@ -373,18 +373,14 @@ export function AccessPanel({
   const issuedDetails = issued ? (
     <div className="issued-access" role="status">
       <h3>Acesso gerado</h3>
-      <p>Guarde a senha agora. Ela não será exibida novamente depois que você sair desta tela.</p>
+      <p>Compartilhe o código ou o link. O operador informará o próprio nome para entrar.</p>
       <p>
         Código: <strong data-testid="issued-code">{issued!.code}</strong>
         <CopyButton value={issued!.code} label="Copiar código" />
       </p>
-      <p>
-        Senha: <code data-testid="issued-password">{issued!.password}</code>
-        <CopyButton value={issued!.password ?? ""} label="Copiar senha" />
-      </p>
       {issued.access_url && <AccessLink url={issued.access_url} />}
       <button className="secondary" onClick={() => setIssued(null)}>
-        Já guardei a senha
+        Concluir
       </button>
     </div>
   ) : null;
@@ -397,7 +393,7 @@ export function AccessPanel({
           onClick={() => {
             if (
               (issued || label || expiry || operator) &&
-              !window.confirm("Voltar? Guarde a senha gerada; dados não salvos serão descartados.")
+              !window.confirm("Voltar? Guarde o código gerado; dados não salvos serão descartados.")
             )
               return;
             onBack();
@@ -437,7 +433,7 @@ export function AccessPanel({
                     p.id !== point &&
                     (issued || label || expiry || operator) &&
                     !window.confirm(
-                      "Trocar de checkpoint? Guarde a senha e confira os dados não salvos antes de continuar.",
+                      "Trocar de checkpoint? Guarde o código e confira os dados não salvos antes de continuar.",
                     )
                   )
                     return;

@@ -5,6 +5,7 @@ import type { AuthOptions, authService } from "./auth.js";
 import { consolidatedView } from "./consolidation.js";
 import { audit, HttpError, transaction } from "./db.js";
 import type { FieldScope } from "./offline.js";
+import { passageTxtLine } from "./passage-txt.js";
 
 const uuid = z.string().uuid(),
   reason = z.string().trim().min(3).max(500);
@@ -26,14 +27,14 @@ const filters = z
   .refine((v) => !v.from || !v.to || Date.parse(v.from) <= Date.parse(v.to), "Período inválido");
 
 // Pending evidence is acknowledged explicitly by each immutable revision.
-export const effectiveView = `SELECT o.*,p.name checkpoint_name,cr.id credential_id,cr.label access_label,cr.operator_name,
+export const effectiveView = `SELECT o.*,p.name checkpoint_name,cr.id credential_id,cr.label access_label,coalesce(cs.operator_name,cr.operator_name) operator_name,
  (EXISTS(SELECT 1 FROM app.observation_flags f WHERE f.organization_id=o.organization_id AND f.observation_id=o.id AND f.reason!='possible_duplicate' AND NOT(f.reason=ANY(coalesce(r.reviewed_flags,ARRAY[]::text[]))))
  OR EXISTS(SELECT 1 FROM app.review_requests q WHERE q.organization_id=o.organization_id AND q.observation_id=o.id AND NOT(q.id=ANY(coalesce(r.reviewed_requests,ARRAY[]::uuid[]))))) review_required,
  coalesce(r.version,0) version,
  (SELECT count(*) FROM app.observation_flags f WHERE f.organization_id=o.organization_id AND f.observation_id=o.id)::int + (SELECT count(*) FROM app.review_requests q WHERE q.organization_id=o.organization_id AND q.observation_id=o.id)::int evidence_version, coalesce(r.bib,o.bib) effective_bib,
  coalesce(r.captured_at,o.estimated_captured_at,o.raw_captured_at) effective_captured_at,
  coalesce(r.disposition,'accepted') disposition,
- CASE WHEN EXISTS(SELECT 1 FROM app.observation_flags f WHERE f.organization_id=o.organization_id AND f.observation_id=o.id AND NOT(f.reason=ANY(coalesce(r.reviewed_flags,ARRAY[]::text[]))))
+ CASE WHEN EXISTS(SELECT 1 FROM app.observation_flags f WHERE f.organization_id=o.organization_id AND f.observation_id=o.id AND f.reason!='possible_duplicate' AND NOT(f.reason=ANY(coalesce(r.reviewed_flags,ARRAY[]::text[]))))
  OR EXISTS(SELECT 1 FROM app.review_requests q WHERE q.organization_id=o.organization_id AND q.observation_id=o.id AND NOT(q.id=ANY(coalesce(r.reviewed_requests,ARRAY[]::uuid[]))))
  THEN 'pending' ELSE coalesce(r.disposition,'accepted') END status,
  EXISTS(SELECT 1 FROM app.observation_flags f WHERE f.organization_id=o.organization_id AND f.observation_id=o.id AND f.reason='possible_duplicate') possible_duplicate
@@ -184,6 +185,40 @@ export function registerManagement(
   app.get(base + "/observations", (req) =>
     scoped(req, (c, a, e) => query(req, c, a.organization_id, e.id)),
   );
+  app.get(base + "/observations.txt", async (req, reply) => {
+    const output = await scoped(req, async (c, a, e) => {
+      const result = await query(req, c, a.organization_id, e.id, true);
+      const sorted = [...result.items].sort(
+        (a, b) =>
+          new Date(a.effective_captured_at).getTime() -
+            new Date(b.effective_captured_at).getTime() || a.id.localeCompare(b.id),
+      );
+      const lines = sorted.map((row) =>
+        passageTxtLine(row.effective_bib, new Date(row.effective_captured_at), e.timezone),
+      );
+      await audit(
+        c,
+        a.organization_id,
+        a.user_id,
+        "observations.exported",
+        e.id,
+        {
+          event_id: e.id,
+          format: "txt",
+          filters: req.query,
+          count: result.total,
+          timezone: e.timezone,
+        },
+        req.id,
+      );
+      return lines.length ? lines.join("\r\n") + "\r\n" : "";
+    });
+    reply
+      .header("Cache-Control", "no-store")
+      .header("Content-Disposition", 'attachment; filename="passagens.txt"')
+      .type("text/plain; charset=utf-8");
+    return output;
+  });
   app.get(base + "/observations.csv", async (req, reply) => {
     const output = await scoped(
       req,

@@ -25,30 +25,31 @@ type Passage = {
   possible_duplicate: boolean;
   needs_review?: boolean;
 };
-type FieldScreen = "capturar" | "registros" | "aparelho";
+type FieldScreen = "capturar" | "registros";
 function currentScreen(): FieldScreen {
   const hash = location.hash.slice(1);
-  return hash === "registros" || hash === "aparelho" ? hash : "capturar";
+  return hash === "registros" ? hash : "capturar";
 }
 export function FieldApp() {
   const [session, setSession] = useState<FieldSession | null>(null),
     [prepared, setPrepared] = useState<Preparation | null>(null),
-    [expired, setExpired] = useState(false),
     [loading, setLoading] = useState(true),
     [error, setError] = useState("");
-  const [code, setCode] = useState(""),
-    [password, setPassword] = useState(""),
-    [showPassword, setShowPassword] = useState(false),
+  const [link, setLink] = useState(() => {
+    const parts = location.pathname.match(/^\/evento\/[^/]+\/([a-fA-F0-9]{8})\/?$/);
+    return {
+      code: parts?.[1]?.toUpperCase() ?? "",
+      token: new URLSearchParams(location.hash.slice(1)).get("access"),
+    };
+  });
+  const [code, setCode] = useState(link.code),
+    [operator, setOperator] = useState(""),
     [busy, setBusy] = useState(false);
-  const linkLogin = useRef<Promise<void> | null>(null);
+  const loginLocked = useRef(false);
   useEffect(() => {
-    const accessToken = new URLSearchParams(location.hash.slice(1)).get("access");
-    if (accessToken || linkLogin.current) {
-      if (!linkLogin.current) {
-        history.replaceState(null, "", location.pathname + location.search);
-        linkLogin.current = authenticate({ access_token: accessToken });
-      }
-      void linkLogin.current.finally(() => setLoading(false));
+    if (link.code || link.token) {
+      history.replaceState(null, "", "/checkpoint");
+      setLoading(false);
       return;
     }
     (async () => {
@@ -58,15 +59,14 @@ export function FieldApp() {
         setSession(s);
         if (p?.session.credential_id === s.credential_id) setPrepared(p);
       } catch (e) {
-        if (p) {
-          const blocked = Boolean(p.blocked || (e instanceof FieldError && e.status === 401));
-          const cached = { ...p, blocked };
-          if (blocked) await savePreparation(cached).catch(() => {});
-          setPrepared(cached);
+        if (e instanceof FieldError && e.status === 401) {
+          if (p) await savePreparation({ ...p, blocked: true }).catch(() => {});
+          setSession(null);
+          setPrepared(null);
+        } else if (p && !p.blocked) {
+          setPrepared(p);
           setSession({ ...p.session, csrf_token: "" });
-          setExpired(blocked);
-        } else if (!(e instanceof FieldError && e.status === 401))
-          setError("Entre com conexão para preparar este aparelho.");
+        } else setError("Entre com conexão para acessar o checkpoint.");
       } finally {
         setLoading(false);
       }
@@ -74,16 +74,23 @@ export function FieldApp() {
   }, []);
   async function login(e: FormEvent) {
     e.preventDefault();
-    await authenticate({ code, password });
+    await authenticate(
+      link.token
+        ? { access_token: link.token, operator_name: operator }
+        : { code, operator_name: operator },
+    );
   }
   async function authenticate(
-    credentials: { code: string; password: string } | { access_token: string | null },
+    credentials:
+      | { code: string; operator_name: string }
+      | { access_token: string; operator_name: string },
   ) {
+    if (loginLocked.current) return;
+    loginLocked.current = true;
     setBusy(true);
     setError("");
     try {
       await request("/login", "", credentials);
-      setPassword("");
       const s = await request<FieldSession>("/me");
       const p = await readPreparation();
       if (p && p.session.credential_id !== s.credential_id) {
@@ -95,19 +102,22 @@ export function FieldApp() {
         if (old.some((i) => !["synced", "confirmed"].includes(i.status))) {
           const blocked = { ...p, blocked: true };
           await savePreparation(blocked);
-          setPrepared(blocked);
-          setSession({ ...p.session, csrf_token: "" });
-          setExpired(true);
+          await request("/logout", s.csrf_token, {});
+          setPrepared(null);
+          setSession(null);
+          setError(
+            "Há registros pendentes de outro acesso neste navegador. Entre com o código anterior para sincronizá-los.",
+          );
           return;
         }
         await savePreparation(null);
         setPrepared(null);
       }
-      setExpired(false);
       setSession(s);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Não foi possível entrar");
     } finally {
+      loginLocked.current = false;
       setBusy(false);
     }
   }
@@ -118,14 +128,14 @@ export function FieldApp() {
         key={session.session_id}
         session={session}
         preparation={prepared}
-        initialExpired={expired}
         onExit={() => {
           setSession(null);
           setPrepared(null);
-        }}
-        onReauthenticate={() => {
-          setSession(null);
-          setExpired(false);
+          setCode("");
+          setOperator("");
+          setLink({ code: "", token: null });
+          setError("");
+          history.replaceState(null, "", "/checkpoint");
         }}
       />
     );
@@ -140,33 +150,36 @@ export function FieldApp() {
       </p>
       <form onSubmit={login}>
         <label>
-          Código do checkpoint
+          Operador
           <input
             required
-            autoComplete="username"
-            maxLength={8}
-            value={code}
-            onChange={(e) => setCode(e.target.value.toUpperCase())}
+            minLength={2}
+            maxLength={120}
+            autoComplete="name"
+            value={operator}
+            onChange={(e) => setOperator(e.target.value)}
+            placeholder="Seu nome"
+            disabled={busy}
           />
         </label>
-        <label>
-          Senha do checkpoint
-          <input
-            required
-            type={showPassword ? "text" : "password"}
-            autoComplete="current-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
-        </label>
-        <button
-          type="button"
-          className="text-button"
-          aria-pressed={showPassword}
-          onClick={() => setShowPassword(!showPassword)}
-        >
-          {showPassword ? "Ocultar senha" : "Mostrar senha"}
-        </button>
+        {!(link.code || link.token) && (
+          <label>
+            Código de acesso
+            <input
+              required
+              autoComplete="off"
+              autoCapitalize="characters"
+              spellCheck={false}
+              maxLength={8}
+              value={code}
+              onChange={(e) => setCode(e.target.value.toUpperCase())}
+              disabled={busy}
+            />
+          </label>
+        )}
+        {(link.code || link.token) && (
+          <p className="field-help">Acesso identificado pelo link. Informe seu nome para entrar.</p>
+        )}
         {error && (
           <p role="alert" className="error">
             {error}
@@ -182,41 +195,31 @@ export function FieldApp() {
 function Capture({
   session: initial,
   preparation,
-  initialExpired,
   onExit,
-  onReauthenticate,
 }: {
   session: FieldSession;
   preparation: Preparation | null;
-  initialExpired: boolean;
   onExit: () => void;
-  onReauthenticate: () => void;
 }) {
   const [session, setSession] = useState(initial),
     [prep, setPrep] = useState(preparation),
     [items, setItems] = useState<Intent[]>([]),
     [history, setHistory] = useState<Passage[]>([]);
   const [bib, setBib] = useState(""),
-    [error, setError] = useState(
-      initialExpired
-        ? "Acesso indisponível. Renove o mesmo acesso ou exporte os pendentes para a organização."
-        : "",
-    ),
+    [error, setError] = useState(""),
     [notice, setNotice] = useState(""),
     [online, setOnline] = useState(navigator.onLine),
     [busy, setBusy] = useState(false),
     [sending, setSending] = useState(false),
-    [expired, setExpired] = useState(initialExpired),
+    [expired, setExpired] = useState(false),
     [tick, setTick] = useState(0),
-    [exported, setExported] = useState(false);
+    [exportBusy, setExportBusy] = useState(false);
   const [screen, setScreen] = useState<FieldScreen>(currentScreen),
     [systemKeyboard, setSystemKeyboard] = useState(false),
     [filter, setFilter] = useState("todos"),
     [selected, setSelected] = useState<string | null>(null),
     [lastCapture, setLastCapture] = useState<{ id: string; bib: string } | null>(null),
-    [syncError, setSyncError] = useState(""),
-    [exportBusy, setExportBusy] = useState(false),
-    [packageSaved, setPackageSaved] = useState(false);
+    [syncError, setSyncError] = useState("");
   const title = useRef<HTMLHeadingElement>(null);
   const scrollPositions = useRef<Partial<Record<FieldScreen, number>>>({});
   const activeScreen = useRef(screen);
@@ -350,9 +353,10 @@ function Capture({
         setPrep(p);
       }
       if (
-        preparationRef.current &&
         s.state === "running" &&
-        performance.now() - lastPrepare.current > 60000
+        (!preparationRef.current ||
+          preparationRef.current.session.session_id !== s.session_id ||
+          performance.now() - lastPrepare.current > 60000)
       )
         await calibrate(s, false);
       const list = await refresh();
@@ -398,9 +402,8 @@ function Capture({
           setPrep(p);
           await savePreparation(p).catch(() => {});
         }
-        setError(
-          "Acesso expirado ou revogado. Fila preservada. Renove o mesmo acesso ou exporte para recuperação administrativa.",
-        );
+        onExit();
+        return;
       } else {
         nextAttempt.current = performance.now() + retryDelay(attempt.current++);
         setSyncError(
@@ -417,7 +420,7 @@ function Capture({
   }
   useEffect(() => {
     let live = true;
-    stopped.current = initialExpired;
+    stopped.current = false;
     (async () => {
       const list = await refresh();
       for (const i of list)
@@ -450,7 +453,7 @@ function Capture({
       window.removeEventListener("focus", focus);
     };
   }, []);
-  const valid = prep ? grantValid(prep) : online;
+  const valid = !!prep && prep.session.session_id === session.session_id && grantValid(prep);
   const enabled = !busy && !expired && session.state === "running" && valid;
   async function capture(e: FormEvent) {
     e.preventDefault();
@@ -460,7 +463,13 @@ function Capture({
       return;
     }
     const p = preparationRef.current;
-    if (expired || scope.current.state !== "running" || (p ? !grantValid(p) : !navigator.onLine)) {
+    if (
+      expired ||
+      scope.current.state !== "running" ||
+      !p ||
+      p.session.session_id !== scope.current.session_id ||
+      !grantValid(p)
+    ) {
       setError("Concessão indisponível ou expirada. Reconecte e prepare o aparelho.");
       return;
     }
@@ -490,8 +499,6 @@ function Capture({
       await saveIntent(item);
       captureVersion.current++;
       setBib("");
-      setExported(false);
-      setPackageSaved(false);
       setLastCapture({ id, bib: item.bib });
       setNotice("");
       setItems((v) => [...v, item]);
@@ -510,7 +517,6 @@ function Capture({
   const pending = items.filter((i) => !["synced", "confirmed"].includes(i.status));
   async function exportRecovery() {
     setExportBusy(true);
-    setPackageSaved(false);
     setError("");
     try {
       const list = await refresh(),
@@ -548,7 +554,6 @@ function Capture({
       a.download = "recuperacao-" + session.checkpoint_id + ".json";
       a.click();
       setTimeout(() => URL.revokeObjectURL(url), 10000);
-      setExported(true);
       setNotice(
         "Download solicitado. Confirme que guardou o arquivo. A fila permanece neste aparelho.",
       );
@@ -559,16 +564,22 @@ function Capture({
     }
   }
   async function logout() {
+    if (busy) return;
+    setBusy(true);
     try {
-      if ((await refresh()).some((i) => !["synced", "confirmed"].includes(i.status))) {
-        setError("Há registros pendentes. Exporte a recuperação ou sincronize antes de sair.");
-        return;
+      try {
+        await request("/logout", scope.current.csrf_token, {});
+      } catch (e) {
+        if (!(e instanceof FieldError && e.status === 401)) throw e;
       }
-      await request("/logout", scope.current.csrf_token, {});
-      await savePreparation(null);
+      stopped.current = true;
+      if (preparationRef.current)
+        await savePreparation({ ...preparationRef.current, blocked: true });
       onExit();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha ao sair");
+    } finally {
+      setBusy(false);
     }
   }
   const uncertain = prep ? clockEvidence(prep.clock).uncertain : true;
@@ -643,10 +654,11 @@ function Capture({
         </div>
         <button
           className="operator-context"
-          onClick={() => navigate("aparelho")}
-          aria-label="Ver aparelho e acesso"
+          onClick={logout}
+          disabled={busy}
+          aria-label="Sair do checkpoint"
         >
-          Aparelho
+          Sair
         </button>
       </header>
       <div className="operator-status">
@@ -656,7 +668,7 @@ function Capture({
       {blockedReason && (
         <div className="operator-warning" role="status">
           {blockedReason}
-          <button onClick={() => navigate("aparelho")}>Ver aparelho</button>
+          <button onClick={() => sync(true)}>Atualizar conexão</button>
         </div>
       )}
       {error && (
@@ -675,7 +687,7 @@ function Capture({
         </p>
       )}
       <h2 className="screen-reader-only" ref={title} tabIndex={-1}>
-        {screen === "capturar" ? "Capturar" : screen === "registros" ? "Registros" : "Aparelho"}
+        {screen === "capturar" ? "Capturar" : "Registros"}
       </h2>
       <section
         className="operator-capture"
@@ -749,7 +761,9 @@ function Capture({
             ? uncertain
               ? "Preparado · horário sujeito a revisão"
               : "Preparado para interrupções"
-            : "Prepare o aparelho para capturar sem conexão"}
+            : online
+              ? "Sincronizando o relógio para liberar a captura…"
+              : "Conecte o aparelho para preparar a captura"}
         </p>
       </section>
       <section
@@ -771,6 +785,19 @@ function Capture({
           {pending.length} pendente(s) no aparelho ·{" "}
           {items.filter((item) => isConfirmed(item.status)).length} confirmado(s) locais
         </p>
+        <details className="record-support">
+          <summary>Opções de sincronização</summary>
+          <button className="secondary" disabled={busy || !online} onClick={prepare}>
+            Preparar para uso offline
+          </button>
+          <button
+            className="secondary"
+            disabled={exportBusy || !pending.length}
+            onClick={exportRecovery}
+          >
+            Exportar registros pendentes
+          </button>
+        </details>
         <div className="record-filters" aria-label="Filtrar registros">
           {[
             ["todos", "Todos"],
@@ -847,131 +874,10 @@ function Capture({
           a exportação inclui todos os pendentes locais.
         </p>
       </section>
-      <section
-        className="operator-panel"
-        hidden={screen !== "aparelho"}
-        aria-label="Aparelho e recuperação"
-      >
-        <h2>Seu aparelho</h2>
-        <p className="device-event-name">{session.event_name}</p>
-        <p>
-          {session.label} · {session.checkpoint_name}
-        </p>
-        <section className="device-section">
-          <h3>Preparação para a corrida</h3>
-          <dl className="device-checks">
-            <div>
-              <dt>Acesso</dt>
-              <dd>
-                {expired
-                  ? "Bloqueado — renove o mesmo acesso"
-                  : "Válido até " + new Date(session.expires_at).toLocaleString("pt-BR")}
-              </dd>
-            </div>
-            <div>
-              <dt>Captura</dt>
-              <dd>
-                {session.state === "running"
-                  ? online
-                    ? "Corrida em andamento"
-                    : "Última situação: em andamento"
-                  : "Pausada"}
-              </dd>
-            </div>
-            <div>
-              <dt>Offline e armazenamento</dt>
-              <dd>
-                {prep && valid ? "Preparado para interrupções" : "Preparação offline necessária"}
-                {prep && " · concessão até " + new Date(prep.grant.expires_at).toLocaleTimeString()}
-              </dd>
-            </div>
-            <div>
-              <dt>Relógio</dt>
-              <dd>{uncertain ? "Horário incerto: sujeito a revisão" : "Referência recente"}</dd>
-            </div>
-          </dl>
-          <button className="primary" disabled={busy || !online || expired} onClick={prepare}>
-            {busy ? "Preparando…" : "Preparar aparelho"}
-          </button>
-          <p className="footnote">
-            Prepare com conexão antes de operar. Mantenha a tela aberta para sincronizar. Rede
-            disponível não significa recebimento pelo servidor.
-          </p>
-        </section>
-        <section className="device-section">
-          <h3>Sincronização e recuperação</h3>
-          <p>
-            {pending.length} pendente(s). Salvo no aparelho não significa recebido pelo servidor.
-          </p>
-          <div className="device-actions">
-            <button
-              className="secondary"
-              disabled={sending || !online || expired}
-              onClick={() => sync(true)}
-            >
-              Atualizar situação da corrida e registros
-            </button>
-            <button
-              className="secondary"
-              disabled={exportBusy || busy || !pending.length}
-              onClick={exportRecovery}
-            >
-              {exportBusy ? "Gerando pacote…" : "Exportar recuperação"}
-            </button>
-          </div>
-          <p className="footnote">
-            Não limpe os dados do navegador. O pacote inclui todos os pendentes e deve ser entregue
-            à organização para revisão.
-          </p>
-          {exported && (
-            <div className="recovery-confirm">
-              <label className="checkbox">
-                <input
-                  type="checkbox"
-                  checked={packageSaved}
-                  onChange={(e) => setPackageSaved(e.target.checked)}
-                />
-                Confirmei que o arquivo foi guardado neste aparelho
-              </label>
-              <button
-                className="secondary"
-                disabled={!packageSaved}
-                onClick={async () => {
-                  try {
-                    await savePreparation(null);
-                    onExit();
-                  } catch {
-                    setError("Não foi possível trocar acesso. A fila foi preservada.");
-                  }
-                }}
-              >
-                Já guardei o pacote; trocar acesso
-              </button>
-            </div>
-          )}
-        </section>
-        <section className="device-section">
-          <h3>Acesso do operador</h3>
-          <p>
-            Renove com o mesmo código para recuperar sua fila. Entrada e renovação exigem conexão.
-          </p>
-          <div className="device-actions">
-            {expired && (
-              <button className="primary" disabled={!online} onClick={onReauthenticate}>
-                Renovar acesso
-              </button>
-            )}
-            <button className="secondary" disabled={busy || exportBusy} onClick={logout}>
-              Sair
-            </button>
-          </div>
-        </section>
-      </section>
       <nav className="operator-nav" aria-label="Navegação do operador">
         {[
           ["capturar", "Capturar", "◉"],
           ["registros", "Registros", "≡"],
-          ["aparelho", "Aparelho", "⚙"],
         ].map(([value, label, icon]) => (
           <a key={value} href={"#" + value} aria-current={screen === value ? "page" : undefined}>
             <span aria-hidden="true">{icon}</span>

@@ -48,8 +48,15 @@ export function registerCapture(
         credential.revoked_at || Date.parse(credential.expires_at) <= Date.now()
           ? null
           : options.origin +
-            "/checkpoint#access=" +
-            accessToken({ id: credential.id, password_hash }),
+            "/evento/" +
+            (String(credential.label)
+              .normalize("NFD")
+              .replace(/[\u0300-\u036f]/g, "")
+              .toLowerCase()
+              .replace(/[^a-z0-9]+/g, "-")
+              .replace(/^-|-$/g, "") || "aparelho") +
+            "/" +
+            credential.code,
     };
   }
   app.addHook("onRequest", async (req, reply) => {
@@ -69,11 +76,18 @@ export function registerCapture(
     )
       throw new HttpError(403, "CSRF_INVALID", "Atualize a página");
     const locator = (
-      await pool.query("SELECT organization_id FROM app.checkpoint_sessions WHERE token_hash=$1", [
-        digest(raw),
-      ])
+      await pool.query(
+        "SELECT organization_id,revoked_reason FROM app.checkpoint_sessions WHERE token_hash=$1",
+        [digest(raw)],
+      )
     ).rows[0];
     if (!locator) throw new HttpError(401, "FIELD_SESSION_EXPIRED", "Acesso expirado ou revogado");
+    if (locator.revoked_reason === "replaced")
+      throw new HttpError(
+        401,
+        "FIELD_SESSION_REPLACED",
+        "Este aparelho foi acessado em outra sessão. Entre novamente para assumir o acesso.",
+      );
     return transaction(
       pool,
       async (c) => {
@@ -253,10 +267,25 @@ export function registerCapture(
                 .trim()
                 .toUpperCase()
                 .regex(/^[A-F0-9]{8}$/),
+              operator_name: z.string().trim().min(2).max(120),
+            })
+            .strict(),
+          z
+            .object({
+              code: z
+                .string()
+                .trim()
+                .toUpperCase()
+                .regex(/^[A-F0-9]{8}$/),
               password: z.string().min(1).max(128),
             })
             .strict(),
-          z.object({ access_token: z.string().regex(/^[a-f0-9-]{36}\.[a-f0-9]{64}$/) }).strict(),
+          z
+            .object({
+              access_token: z.string().regex(/^[a-f0-9-]{36}\.[a-f0-9]{64}$/),
+              operator_name: z.string().trim().min(2).max(120).optional(),
+            })
+            .strict(),
         ])
         .parse(req.body);
       const linkId = "access_token" in input ? uuid.parse(input.access_token.split(".")[0]) : null;
@@ -280,9 +309,11 @@ export function registerCapture(
       if (
         !("access_token" in input
           ? credential && equal(input.access_token, accessToken(credential))
-          : await verifyPassword(input.password, credential?.password_hash ?? null))
+          : "password" in input
+            ? await verifyPassword(input.password, credential?.password_hash ?? null)
+            : !!credential)
       )
-        throw new HttpError(401, "INVALID_CREDENTIAL", "Código ou senha inválidos");
+        throw new HttpError(401, "INVALID_CREDENTIAL", "Acesso inválido, expirado ou revogado");
       const raw = token();
       await transaction(
         pool,
@@ -292,15 +323,28 @@ export function registerCapture(
               `SELECT cr.* FROM app.checkpoint_credentials cr
     JOIN app.checkpoints p ON p.id=cr.checkpoint_id AND p.organization_id=cr.organization_id
     JOIN app.organizations o ON o.id=cr.organization_id
-    WHERE cr.id=$1 AND cr.revoked_at IS NULL AND cr.expires_at>clock_timestamp() AND p.active AND o.active FOR SHARE OF cr,p`,
+    WHERE cr.id=$1 AND cr.revoked_at IS NULL AND cr.expires_at>clock_timestamp() AND p.active AND o.active FOR UPDATE OF cr FOR SHARE OF p`,
               [credential.id],
             )
           ).rows[0];
-          if (!cr) throw new HttpError(401, "INVALID_CREDENTIAL", "Código ou senha inválidos");
+          if (!cr)
+            throw new HttpError(401, "INVALID_CREDENTIAL", "Acesso inválido, expirado ou revogado");
+          const operatorName =
+            "operator_name" in input && input.operator_name
+              ? input.operator_name
+              : cr.operator_name;
+          await c.query(
+            "UPDATE app.checkpoint_credentials SET operator_name=$1 WHERE organization_id=$2 AND id=$3",
+            [operatorName, cr.organization_id, cr.id],
+          );
+          const replaced = await c.query(
+            "UPDATE app.checkpoint_sessions SET revoked_at=clock_timestamp(),revoked_reason='replaced' WHERE organization_id=$1 AND credential_id=$2 AND revoked_at IS NULL RETURNING id",
+            [cr.organization_id, cr.id],
+          );
           const s = (
             await c.query(
-              `INSERT INTO app.checkpoint_sessions(token_hash,organization_id,event_id,checkpoint_id,credential_id,expires_at)
-    VALUES($1,$2,$3,$4,$5,LEAST($6,now()+interval '12 hours')) RETURNING id`,
+              `INSERT INTO app.checkpoint_sessions(token_hash,organization_id,event_id,checkpoint_id,credential_id,expires_at,operator_name)
+    VALUES($1,$2,$3,$4,$5,LEAST($6,now()+interval '12 hours'),$7) RETURNING id`,
               [
                 digest(raw),
                 cr.organization_id,
@@ -308,6 +352,7 @@ export function registerCapture(
                 cr.checkpoint_id,
                 cr.id,
                 cr.expires_at,
+                operatorName,
               ],
             )
           ).rows[0];
@@ -317,7 +362,12 @@ export function registerCapture(
             null,
             "checkpoint.login",
             s.id,
-            { event_id: cr.event_id, checkpoint_id: cr.checkpoint_id, device_id: cr.device_id },
+            {
+              event_id: cr.event_id,
+              checkpoint_id: cr.checkpoint_id,
+              device_id: cr.device_id,
+              replaced_sessions: replaced.rows.map((row) => row.id),
+            },
             req.id,
           );
           await c.query("DELETE FROM app.auth_limits WHERE key=$1", [digest("field:" + loginKey)]);

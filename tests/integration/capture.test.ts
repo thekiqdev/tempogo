@@ -99,7 +99,7 @@ test("Sprint 02: captura manual, credenciais e concorrência", async (t) => {
     raw_captured_at: new Date().toISOString(),
   };
   try {
-    await t.test("emissão, senha somente uma vez e duas sessões isoladas", async () => {
+    await t.test("emissão e dois aparelhos independentes no mesmo checkpoint", async () => {
       const issued = await admin("POST", "/checkpoints/" + cp + "/access", {
         label: "Celular 01",
         expires_at: new Date(Date.now() + 3600000).toISOString(),
@@ -111,66 +111,136 @@ test("Sprint 02: captura manual, credenciais e concorrência", async (t) => {
       assert.equal(list.json().items[0].password, undefined);
       assert.equal(list.json().items[0].password_hash, undefined);
       one = await login(access.code, access.password);
-      two = await login(access.code, access.password);
+      const other = (
+        await admin("POST", "/checkpoints/" + cp + "/access", {
+          label: "Celular 02",
+          expires_at: new Date(Date.now() + 3600000).toISOString(),
+        })
+      ).json();
+      two = await login(other.code, other.password);
       assert.notEqual(one.id, two.id);
     });
-    await t.test(
-      "link assinado: login, adulteração, validade, revogação e redefinição",
-      async () => {
-        const issueLink = async () =>
-          (
-            await admin("POST", "/checkpoints/" + cp + "/access", {
-              label: "Link test",
-              expires_at: new Date(Date.now() + 3600000).toISOString(),
-            })
-          ).json();
-        const enter = (access_url: string) =>
+    await t.test("nome e código: login, autoria, validade, revogação e redefinição", async () => {
+      const issueLink = async () =>
+        (
+          await admin("POST", "/checkpoints/" + cp + "/access", {
+            label: "Link test",
+            expires_at: new Date(Date.now() + 3600000).toISOString(),
+          })
+        ).json();
+      const enter = (access_url: string) =>
+        app.inject({
+          method: "POST",
+          url: "/api/v1/field/login",
+          headers: { origin },
+          payload: {
+            code: new URL(access_url).pathname.split("/").at(-1),
+            operator_name: "Ana Silva",
+          },
+        });
+      const a = await issueLink();
+      assert.ok(a.access_url.startsWith(origin + "/evento/link-test/"));
+      assert.equal(a.password_hash, undefined);
+      const listing = (await admin("GET", "/checkpoints/" + cp + "/access"))
+        .json()
+        .items.find((i: { id: string }) => i.id === a.id);
+      assert.equal(listing.access_url, a.access_url);
+      assert.equal(listing.password_hash, undefined);
+      const logged = await enter(a.access_url);
+      assert.equal(logged.statusCode, 200, logged.body);
+      const cookie = String(logged.headers["set-cookie"]).split(";")[0];
+      const me = await app.inject({ url: "/api/v1/field/me", headers: { cookie } });
+      assert.equal(me.json().checkpoint_id, cp);
+      const second = await app.inject({
+        method: "POST",
+        url: "/api/v1/field/login",
+        headers: { origin },
+        payload: { code: a.code, operator_name: "Bruno Lima" },
+      });
+      assert.equal(second.statusCode, 200, second.body);
+      const oldSession = await app.inject({ url: "/api/v1/field/me", headers: { cookie } });
+      assert.equal(oldSession.statusCode, 401);
+      assert.equal(oldSession.json().error.code, "FIELD_SESSION_REPLACED");
+      const secondCookie = String(second.headers["set-cookie"]).split(";")[0];
+      assert.equal(
+        (await app.inject({ url: "/api/v1/field/me", headers: { cookie: secondCookie } }))
+          .statusCode,
+        200,
+      );
+      const concurrent = await Promise.all(
+        Array.from({ length: 3 }, (_, i) =>
           app.inject({
             method: "POST",
             url: "/api/v1/field/login",
             headers: { origin },
-            payload: {
-              access_token: new URLSearchParams(new URL(access_url).hash.slice(1)).get("access"),
-            },
-          });
-        const a = await issueLink();
-        assert.ok(a.access_url.startsWith(origin + "/checkpoint#access="));
-        assert.equal(a.password_hash, undefined);
-        const listing = (await admin("GET", "/checkpoints/" + cp + "/access"))
-          .json()
-          .items.find((i: { id: string }) => i.id === a.id);
-        assert.equal(listing.access_url, a.access_url);
-        assert.equal(listing.password_hash, undefined);
-        const logged = await enter(a.access_url);
-        assert.equal(logged.statusCode, 200, logged.body);
-        const cookie = String(logged.headers["set-cookie"]).split(";")[0];
-        const me = await app.inject({ url: "/api/v1/field/me", headers: { cookie } });
-        assert.equal(me.json().checkpoint_id, cp);
-        const tampered = a.access_url.slice(0, -1) + (a.access_url.endsWith("a") ? "b" : "a");
-        assert.equal((await enter(tampered)).statusCode, 401);
-        await admin("POST", "/access/" + a.id + "/revoke", {});
-        assert.equal((await enter(a.access_url)).statusCode, 401);
-        assert.equal(
-          (await app.inject({ url: "/api/v1/field/me", headers: { cookie } })).statusCode,
-          401,
-        );
-        const b = await issueLink();
-        await db.query(
-          "UPDATE app.checkpoint_credentials SET expires_at=now()-interval '1 second' WHERE id=$1",
-          [b.id],
-        );
-        assert.equal((await enter(b.access_url)).statusCode, 401);
-        const c = await issueLink();
-        const replacement = await admin("POST", "/checkpoints/" + cp + "/access", {
-          label: "Link renewed",
-          replace_access_id: c.id,
-          expires_at: new Date(Date.now() + 3600000).toISOString(),
-        });
-        assert.equal(replacement.statusCode, 201, replacement.body);
-        assert.equal((await enter(c.access_url)).statusCode, 401);
-        assert.equal((await enter(replacement.json().access_url)).statusCode, 200);
-      },
-    );
+            payload: { code: a.code, operator_name: "Operador " + i },
+          }),
+        ),
+      );
+      assert.ok(concurrent.every((r) => r.statusCode === 200));
+      const currentSessions = await Promise.all(
+        concurrent.map((r) =>
+          app.inject({
+            url: "/api/v1/field/me",
+            headers: { cookie: String(r.headers["set-cookie"]).split(";")[0] },
+          }),
+        ),
+      );
+      assert.equal(currentSessions.filter((r) => r.statusCode === 200).length, 1);
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/field/login",
+        headers: { origin },
+        payload: { code: a.code, operator_name: "Bruno Lima" },
+      });
+      assert.equal(
+        (await db.query("SELECT operator_name FROM app.checkpoint_credentials WHERE id=$1", [a.id]))
+          .rows[0].operator_name,
+        "Bruno Lima",
+      );
+      assert.equal(
+        (
+          await db.query("SELECT operator_name FROM app.checkpoint_sessions WHERE id=$1", [
+            me.json().session_id,
+          ])
+        ).rows[0].operator_name,
+        "Ana Silva",
+      );
+      assert.equal(
+        (
+          await app.inject({
+            method: "POST",
+            url: "/api/v1/field/login",
+            headers: { origin },
+            payload: { code: a.code, operator_name: " " },
+          })
+        ).statusCode,
+        422,
+      );
+      const tampered = a.access_url.slice(0, -1) + (a.access_url.endsWith("a") ? "b" : "a");
+      assert.equal((await enter(tampered)).statusCode, 401);
+      await admin("POST", "/access/" + a.id + "/revoke", {});
+      assert.equal((await enter(a.access_url)).statusCode, 401);
+      assert.equal(
+        (await app.inject({ url: "/api/v1/field/me", headers: { cookie } })).statusCode,
+        401,
+      );
+      const b = await issueLink();
+      await db.query(
+        "UPDATE app.checkpoint_credentials SET expires_at=now()-interval '1 second' WHERE id=$1",
+        [b.id],
+      );
+      assert.equal((await enter(b.access_url)).statusCode, 401);
+      const c = await issueLink();
+      const replacement = await admin("POST", "/checkpoints/" + cp + "/access", {
+        label: "Link renewed",
+        replace_access_id: c.id,
+        expires_at: new Date(Date.now() + 3600000).toISOString(),
+      });
+      assert.equal(replacement.statusCode, 201, replacement.body);
+      assert.equal((await enter(c.access_url)).statusCode, 401);
+      assert.equal((await enter(replacement.json().access_url)).statusCode, 200);
+    });
     await t.test(
       "contrato executável, entradas inválidas, sem IA e sem escolha de checkpoint",
       async () => {
@@ -398,6 +468,13 @@ test("Sprint 02: captura manual, credenciais e concorrência", async (t) => {
         assert.equal(consolidated.statusCode, 200, consolidated.body);
         assert.equal(consolidated.json().total, 2);
         const all = (await admin("GET", path + "?view=consolidated&bib=00888")).json().items;
+        const originals = (await admin("GET", path + "?view=records&bib=00888")).json().items;
+        assert.ok(
+          originals.every(
+            (i: { status: string; needs_review: boolean }) =>
+              i.status === "accepted" && !i.needs_review,
+          ),
+        );
         const group = all.find((i: { id: string }) => i.id === first.id);
         assert.equal(group.operator_name, "Ana");
         assert.equal(group.observation_count, 2);

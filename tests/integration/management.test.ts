@@ -82,18 +82,24 @@ test("Sprint 04: revisão, exportação e conciliação", async (t) => {
       expires_at: new Date(Date.now() + 3600000).toISOString(),
     })
   ).json();
-  async function login() {
+  async function login(credential = access) {
     const r = await app.inject({
       method: "POST",
       url: "/api/v1/field/login",
       headers: { origin },
-      payload: { code: access.code, password: access.password },
+      payload: { code: credential.code, password: credential.password },
     });
     assert.equal(r.statusCode, 200, r.body);
     return { cookie: String(r.headers["set-cookie"]).split(";")[0]!, csrf: r.json().csrf_token };
   }
-  const fieldOne = await login(),
-    fieldTwo = await login();
+  const fieldOne = await login();
+  const secondAccess = (
+    await admin("POST", "/checkpoints/" + cp + "/access", {
+      label: "Independent phone",
+      expires_at: new Date(Date.now() + 3600000).toISOString(),
+    })
+  ).json();
+  const fieldTwo = await login(secondAccess);
   function field(method: "GET" | "POST", path: string, payload?: unknown, who = fieldOne) {
     return app.inject({
       method,
@@ -140,11 +146,19 @@ test("Sprint 04: revisão, exportação e conciliação", async (t) => {
       assert.equal(r.statusCode, 200, r.body);
       assert.equal(r.json().total, 1);
       assert.equal(r.json().items[0].bib, "00012");
+      const txt = await admin("GET", base + "/observations.txt?bib=00012&limit=1&offset=10");
+      assert.equal(txt.statusCode, 200, txt.body);
+      assert.match(
+        txt.body,
+        /^000000000000000000000012;\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}:\d{2}:\d{3}\r\n$/,
+      );
+      assert.equal((await admin("GET", base + "/observations.txt?bib=99999999")).body, "");
       assert.equal((await admin("GET", base + "/observations?offset=1")).json().items.length, 0);
       assert.equal((await admin("GET", base + "/observations?bib=12")).json().total, 0);
       for (const suffix of [
         "/observations",
         "/observations.csv",
+        "/observations.txt",
         "/observations?view=consolidated",
         "/observations/" + obs.id,
         "/audit",
@@ -305,10 +319,17 @@ test("Sprint 04: revisão, exportação e conciliação", async (t) => {
       assert.equal((await admin("POST", base + "/reconciliation", v)).statusCode, 409);
       await field("POST", "/heartbeat", { pending: 0, sending: 0, synced: 1, blocked: 0 });
       assert.equal((await admin("POST", base + "/reconciliation", v)).statusCode, 200);
-      assert.equal((await admin("GET", base + "/reconciliation")).json().items[0].reconciled, true);
+      assert.equal(
+        (await admin("GET", base + "/reconciliation"))
+          .json()
+          .items.find((item: { id: string }) => item.id === access.id).reconciled,
+        true,
+      );
       await field("POST", "/heartbeat", { pending: 1, sending: 0, synced: 1, blocked: 0 });
       assert.equal(
-        (await admin("GET", base + "/reconciliation")).json().items[0].reconciled,
+        (await admin("GET", base + "/reconciliation"))
+          .json()
+          .items.find((item: { id: string }) => item.id === access.id).reconciled,
         false,
       );
     });
@@ -352,7 +373,9 @@ test("Sprint 04: revisão, exportação e conciliação", async (t) => {
         );
         assert.equal((await transition("closed")).statusCode, 200);
         assert.equal(
-          (await admin("GET", base + "/reconciliation")).json().items[0].reconciled,
+          (await admin("GET", base + "/reconciliation"))
+            .json()
+            .items.find((item: { id: string }) => item.id === access.id).reconciled,
           false,
         );
         const history = (await admin("GET", base + "/audit?limit=100")).json();

@@ -152,6 +152,7 @@ test("Sprint 03: concessões, sincronização e recuperação", async (t) => {
       assert.equal(new Set(all.map((r) => r.json().id)).size, 1);
       assert.equal(all[0].json().raw_captured_at, p.raw_captured_at);
       assert.ok(all[0].json().estimated_captured_at);
+      assert.equal(all[0].json().needs_review, false);
       assert.equal((await field(one, "POST", "/sync", { ...p, bib: "123" })).statusCode, 409);
       assert.equal((await field(one, "POST", "/sync", { ...p, source: "ai" })).statusCode, 400);
     });
