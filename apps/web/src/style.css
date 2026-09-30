@@ -1535,7 +1535,7 @@ p {
 }
 .wizard-progress {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   padding: 18px 12px;
   gap: 8px;
   border-bottom: 1px solid #e4eaee;
@@ -2350,16 +2350,19 @@ p {
   background: #eff6f3;
   border-color: #91b6ab;
 }
-.crm-content button.primary {
+.crm-content button.primary,
+.crm-topbar button.primary {
   background: var(--platform-accent);
   border-color: var(--platform-accent);
   color: white;
   font-weight: 650;
 }
-.crm-content button.primary:hover:not(:disabled) {
+.crm-content button.primary:hover:not(:disabled),
+.crm-topbar button.primary:hover:not(:disabled) {
   background: #084d40;
 }
-.crm-content button:disabled {
+.crm-content button:disabled,
+.crm-topbar button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
@@ -4639,6 +4642,202 @@ p {
 }
 @media (max-width: 700px) {
   .passage-inline-review form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Contextual page headers: identity and actions share the available viewport. */
+.admin-workspace .organizer-topbar {
+  display: flex;
+  height: auto;
+  min-height: 84px;
+  padding: 16px 28px;
+  gap: 16px;
+  flex-wrap: wrap;
+  color: #203747;
+}
+.organizer-header-content {
+  flex: 1 1 280px;
+  min-width: 0;
+}
+.organizer-heading {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+.header-title-block {
+  flex: 1;
+  min-width: 0;
+}
+.admin-workspace .organizer-topbar h1,
+.platform-workspace .crm-header-title {
+  margin: 0;
+  font-size: 23px;
+  line-height: 1.25;
+  letter-spacing: -0.5px;
+  overflow-wrap: anywhere;
+  color: #203747;
+}
+.header-metadata {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: #6b7f89;
+  line-height: 1.4;
+}
+.organizer-topbar .header-metadata span {
+  color: inherit;
+}
+.organizer-heading > .badge {
+  flex-shrink: 0;
+  white-space: normal;
+  text-align: center;
+}
+.header-back {
+  width: 40px;
+  min-height: 40px;
+  flex-shrink: 0;
+  border: 1px solid #dde6e9;
+  border-radius: 10px;
+  background: #f7faf9;
+  color: #146c59;
+  font-size: 20px;
+  padding: 0;
+}
+.header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.header-actions:empty {
+  display: none;
+}
+.header-actions > button {
+  min-height: 42px;
+  margin: 0;
+  font-size: 12px;
+  padding: 10px 16px;
+}
+.admin-workspace .page {
+  padding-top: 20px;
+}
+.admin-workspace .tabs {
+  margin-top: 0;
+}
+.platform-workspace .crm-header-title {
+  font-size: 20px;
+  flex: 1;
+  min-width: 0;
+}
+.platform-workspace .crm-account {
+  margin-left: 0;
+}
+.platform-workspace .crm-header-actions {
+  margin-left: auto;
+}
+@media (max-width: 850px) {
+  .platform-workspace .crm-topbar {
+    flex-wrap: wrap;
+  }
+  .platform-workspace .crm-header-actions:not(:empty) {
+    order: 5;
+    flex-basis: 100%;
+    padding-bottom: 6px;
+  }
+}
+@media (max-width: 700px) {
+  .admin-workspace .organizer-topbar {
+    padding: 14px 16px;
+    min-height: 70px;
+    gap: 12px;
+  }
+  .organizer-header-content {
+    flex-basis: 180px;
+  }
+  .organizer-heading {
+    flex-wrap: wrap;
+    gap: 8px 10px;
+  }
+  .admin-workspace .organizer-topbar h1 {
+    font-size: 21px;
+  }
+  .organizer-heading .header-title-block {
+    flex-basis: calc(100% - 50px);
+  }
+  .organizer-heading > .badge {
+    margin-left: 50px;
+    font-size: 11px;
+    padding: 5px 9px;
+  }
+  .header-metadata {
+    font-size: 11px;
+    gap: 3px 10px;
+  }
+  .header-actions {
+    gap: 8px;
+  }
+  .header-actions > button {
+    min-height: 44px;
+    padding: 9px 12px;
+  }
+  .admin-workspace .page {
+    padding-top: 16px;
+  }
+}
+
+.lap-fields,
+.chip-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.chip-import {
+  min-width: 0;
+  margin: 16px 0;
+  padding: 16px;
+  border: 1px solid #dce6e9;
+  border-radius: 12px;
+}
+.chip-import legend {
+  font-weight: 700;
+}
+.chip-import input[type="file"] {
+  width: 100%;
+  min-width: 0;
+}
+.chip-preview {
+  overflow-x: auto;
+  margin: 12px 0;
+}
+.chip-preview table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  text-align: left;
+}
+.chip-preview th,
+.chip-preview td {
+  padding: 8px;
+  border-bottom: 1px solid #e0e7e9;
+  overflow-wrap: anywhere;
+}
+.passage-identity {
+  min-width: 0;
+}
+.passages-workspace .passage-list small.lap-warning {
+  color: #946512;
+}
+.event-chip-settings {
+  margin-top: 20px;
+}
+@media (max-width: 600px) {
+  .lap-fields,
+  .chip-columns {
     grid-template-columns: minmax(0, 1fr);
   }
 }

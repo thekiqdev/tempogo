@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import type pg from "pg";
 import { z } from "zod";
 import type { AuthOptions, authService } from "./auth.js";
-import { consolidatedView } from "./consolidation.js";
+import { consolidatedView, passageView } from "./consolidation.js";
 import { audit, HttpError, transaction } from "./db.js";
 import type { FieldScope } from "./offline.js";
 import { passageTxtLine } from "./passage-txt.js";
@@ -27,7 +27,7 @@ const filters = z
   .refine((v) => !v.from || !v.to || Date.parse(v.from) <= Date.parse(v.to), "Período inválido");
 
 // Pending evidence is acknowledged explicitly by each immutable revision.
-export const effectiveView = `SELECT o.*,p.name checkpoint_name,cr.id credential_id,cr.label access_label,coalesce(cs.operator_name,cr.operator_name) operator_name,
+export const effectiveView = `SELECT o.*,chips.chip,p.name checkpoint_name,cr.id credential_id,cr.label access_label,coalesce(cs.operator_name,cr.operator_name) operator_name,
  (EXISTS(SELECT 1 FROM app.observation_flags f WHERE f.organization_id=o.organization_id AND f.observation_id=o.id AND f.reason!='possible_duplicate' AND NOT(f.reason=ANY(coalesce(r.reviewed_flags,ARRAY[]::text[]))))
  OR EXISTS(SELECT 1 FROM app.review_requests q WHERE q.organization_id=o.organization_id AND q.observation_id=o.id AND NOT(q.id=ANY(coalesce(r.reviewed_requests,ARRAY[]::uuid[]))))) review_required,
  coalesce(r.version,0) version,
@@ -41,7 +41,8 @@ export const effectiveView = `SELECT o.*,p.name checkpoint_name,cr.id credential
  FROM app.observations o JOIN app.checkpoints p ON p.organization_id=o.organization_id AND p.id=o.checkpoint_id
  JOIN app.checkpoint_sessions cs ON cs.organization_id=o.organization_id AND cs.id=o.session_id
  JOIN app.checkpoint_credentials cr ON cr.organization_id=cs.organization_id AND cr.id=cs.credential_id
- LEFT JOIN LATERAL(SELECT * FROM app.observation_revisions r WHERE r.organization_id=o.organization_id AND r.observation_id=o.id ORDER BY version DESC LIMIT 1) r ON true`;
+ LEFT JOIN LATERAL(SELECT * FROM app.observation_revisions r WHERE r.organization_id=o.organization_id AND r.observation_id=o.id ORDER BY version DESC LIMIT 1) r ON true
+ LEFT JOIN app.event_chips chips ON chips.organization_id=o.organization_id AND chips.event_id=o.event_id AND chips.bib=coalesce(r.bib,o.bib)`;
 
 export async function eventLock(c: pg.PoolClient, org: string, id: string, exclusive = false) {
   const e = (
@@ -159,7 +160,7 @@ export function registerManagement(
       }
     }
     const where = conditions.join(" AND "),
-      source = `FROM (${f.view === "consolidated" ? consolidatedView(effectiveView) : effectiveView}) v WHERE ${where}`;
+      source = `FROM (${passageView(effectiveView, f.view === "records")}) v WHERE ${where}`;
     const summary = (
       await c.query(
         `SELECT count(*)::int total,count(*) FILTER(WHERE status='pending')::int pending,count(*) FILTER(WHERE status='invalidated')::int invalidated ${source}`,
@@ -170,7 +171,7 @@ export function registerManagement(
       throw new HttpError(422, "EXPORT_TOO_LARGE", "Filtre a exportação para até 50.000 passagens");
     const rows = (
       await c.query(
-        `SELECT id,bib,raw_captured_at,estimated_captured_at,received_at,source,checkpoint_id,checkpoint_name,version,effective_bib,effective_captured_at,disposition,status,possible_duplicate,operator_name,access_label,credential_id,device_id,${f.view === "consolidated" ? "observation_count,members" : "1 observation_count, NULL::jsonb members"},status='pending' needs_review ${source} ORDER BY received_at DESC,id LIMIT $${values.length + 1} OFFSET $${values.length + 2}`,
+        `SELECT id,bib,raw_captured_at,estimated_captured_at,received_at,source,checkpoint_id,checkpoint_name,version,effective_bib,effective_captured_at,disposition,status,possible_duplicate,operator_name,access_label,credential_id,device_id,chip,lap_number,lap_too_soon,total_laps,lap_exceeded,observation_count,members,status='pending' needs_review ${source} ORDER BY received_at DESC,id LIMIT $${values.length + 1} OFFSET $${values.length + 2}`,
         [...values, exporting ? 50000 : f.limit, exporting ? 0 : f.offset],
       )
     ).rows;
@@ -194,7 +195,11 @@ export function registerManagement(
             new Date(b.effective_captured_at).getTime() || a.id.localeCompare(b.id),
       );
       const lines = sorted.map((row) =>
-        passageTxtLine(row.effective_bib, new Date(row.effective_captured_at), e.timezone),
+        passageTxtLine(
+          row.chip ?? row.effective_bib,
+          new Date(row.effective_captured_at),
+          e.timezone,
+        ),
       );
       await audit(
         c,
@@ -227,6 +232,11 @@ export function registerManagement(
         const columns = [
           "id",
           "effective_bib",
+          "chip",
+          "lap_number",
+          "total_laps",
+          "lap_too_soon",
+          "lap_exceeded",
           "bib",
           "checkpoint_name",
           "effective_captured_at",

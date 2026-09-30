@@ -1,6 +1,7 @@
 import type { Checkpoint } from "@tempogo/contracts";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { api } from "./api";
+import { HeaderActions } from "./page-header";
 
 type Access = {
   id: string;
@@ -472,21 +473,23 @@ export function AccessPanel({
             online <span className="access-count-divider">/</span> {items.length} cadastrados
           </p>
         </div>
-        <button className="secondary" aria-expanded={live} onClick={() => setLive(!live)}>
-          ◉ Ao vivo
-        </button>
-        <button
-          className="primary"
-          disabled={busy || !points.find((p) => p.id === point)?.active}
-          onClick={() => {
-            resetForm();
-            setCreating(true);
-            setIssued(null);
-            setIssuedAnchor(null);
-          }}
-        >
-          + Novo acesso
-        </button>
+        <HeaderActions>
+          <button className="secondary" aria-expanded={live} onClick={() => setLive(!live)}>
+            ◉ Ao vivo
+          </button>
+          <button
+            className="primary"
+            disabled={busy || !points.find((p) => p.id === point)?.active}
+            onClick={() => {
+              resetForm();
+              setCreating(true);
+              setIssued(null);
+              setIssuedAnchor(null);
+            }}
+          >
+            + Novo acesso
+          </button>
+        </HeaderActions>
       </div>
       {live && <LiveAccess key={point} eventId={eventId} checkpointId={point} />}
       <div className="access-help">

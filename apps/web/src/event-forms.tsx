@@ -2,6 +2,8 @@ import type { Checkpoint, RaceEvent } from "@tempogo/contracts";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { kilometersToMeters, timezoneLabels } from "./admin-format";
 import { api } from "./api";
+import { type ChipMapping } from "./chip-file";
+import { ChipFilePicker } from "./chip-import";
 
 const distanceInput = /^\d*(?:[.,]\d{0,3})?$/;
 
@@ -14,12 +16,17 @@ export function EventForm({
   onSave: (id: string) => Promise<void>;
   onCancel: () => void;
 }) {
+  const [chipPickerKey, setChipPickerKey] = useState(0);
+  const [chips, setChips] = useState<ChipMapping[] | null>(null),
+    [chipsValid, setChipsValid] = useState(true);
   const [step, setStep] = useState(0),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
     [discard, setDiscard] = useState(false);
   const [values, setValues] = useState({
     name: race?.name ?? "",
+    laps: String(race?.laps ?? 1),
+    min_lap_seconds: race ? String(race.min_lap_seconds ?? 60) : "",
     category_name: race?.category_name ?? "Corrida de rua",
     local_date: race?.local_date ?? "",
     location: race?.location ?? "",
@@ -53,6 +60,19 @@ export function EventForm({
     if (!form.current?.reportValidity()) return;
     try {
       kilometersToMeters(values.distance);
+      if (
+        !Number.isInteger(Number(values.laps)) ||
+        Number(values.laps) < 1 ||
+        Number(values.laps) > 999
+      )
+        throw Error("Informe de 1 a 999 voltas.");
+      if (
+        Number(values.laps) > 1 &&
+        (!values.min_lap_seconds ||
+          Number(values.min_lap_seconds) < 11 ||
+          Number(values.min_lap_seconds) > 86400)
+      )
+        throw Error("Informe um intervalo entre 11 e 86.400 segundos.");
       setError("");
       setStep((v) => v + 1);
     } catch (e) {
@@ -61,11 +81,11 @@ export function EventForm({
   }
   async function submit(e: FormEvent) {
     e.preventDefault();
-    if (step < 2) {
+    if (step < 3) {
       next();
       return;
     }
-    if (submitting.current) return;
+    if (submitting.current || !chipsValid) return;
     submitting.current = true;
     setBusy(true);
     setError("");
@@ -76,6 +96,9 @@ export function EventForm({
           race ? "PATCH" : "POST",
           {
             name: values.name.trim(),
+            laps: Number(values.laps),
+            min_lap_seconds: Number(values.min_lap_seconds || 60),
+            ...(chips ? { chip_mappings: chips } : {}),
             category_name: values.category_name.trim(),
             local_date: values.local_date,
             location: values.location.trim(),
@@ -102,7 +125,7 @@ export function EventForm({
   return (
     <form ref={form} className="guided-form" onSubmit={submit}>
       <div className="wizard-progress" aria-label="Etapas do cadastro">
-        {["Identificação", "Data e local", "Conferência"].map((label, index) => (
+        {["Identificação", "Data e local", "Importar chips", "Conferência"].map((label, index) => (
           <span key={label} aria-current={step === index ? "step" : undefined}>
             <b>{index + 1}</b>
             <span>{label}</span>
@@ -110,15 +133,23 @@ export function EventForm({
         ))}
       </div>
       <div className="guided-body">
-        <p className="eyebrow">PASSO {step + 1} DE 3</p>
+        <p className="eyebrow">PASSO {step + 1} DE 4</p>
         <h2 ref={heading} tabIndex={-1}>
-          {["Vamos conhecer sua prova", "Quando e onde será?", "Confira antes de salvar"][step]}
+          {
+            [
+              "Vamos conhecer sua prova",
+              "Quando e onde será?",
+              "Vincule os chips aos peitos",
+              "Confira antes de salvar",
+            ][step]
+          }
         </h2>
         <p className="muted">
           {
             [
               "Comece pelo básico. Os pontos do percurso vêm depois.",
               "Confira a data e o fuso usados pela organização.",
+              "Esta etapa é opcional. Você também pode importar depois em Configuração.",
               "Seu evento fica em rascunho até você preparar a operação.",
             ][step]
           }
@@ -148,6 +179,48 @@ export function EventForm({
                 onChange={(e) => update("category_name", e.target.value)}
               />
             </label>
+            <div className="lap-fields">
+              <label>
+                Número de voltas
+                <input
+                  name="laps"
+                  inputMode="numeric"
+                  pattern="[0-9]{1,3}"
+                  required
+                  value={values.laps}
+                  onChange={(e) => {
+                    if (/^\d{0,3}$/.test(e.target.value)) update("laps", e.target.value);
+                  }}
+                  onBlur={(e) =>
+                    e.target.setCustomValidity(
+                      Number(values.laps) >= 1 ? "" : "Informe pelo menos uma volta.",
+                    )
+                  }
+                  onInput={(e) => e.currentTarget.setCustomValidity("")}
+                />
+              </label>
+              {Number(values.laps) > 1 && (
+                <label>
+                  Intervalo mínimo entre voltas (segundos)
+                  <input
+                    name="min_lap_seconds"
+                    inputMode="numeric"
+                    pattern="[0-9]{1,5}"
+                    required
+                    value={values.min_lap_seconds}
+                    onChange={(e) => {
+                      if (/^\d{0,5}$/.test(e.target.value))
+                        update("min_lap_seconds", e.target.value);
+                    }}
+                    placeholder="Ex.: 300 para 5 minutos"
+                  />
+                </label>
+              )}
+            </div>
+            <p className="field-help">
+              Capturas em até 10 segundos são agrupadas. Em provas com voltas, o intervalo mínimo
+              deve ser maior que 10 segundos; registros antecipados permanecem na mesma volta.
+            </p>
             <label>
               Distância (km, opcional)
               <input
@@ -226,9 +299,38 @@ export function EventForm({
             </p>
           </>
         )}
-        {step === 2 && (
+        <div hidden={step !== 2}>
+          <ChipFilePicker
+            key={chipPickerKey}
+            onChange={(rows, valid) => {
+              setChips(rows);
+              setChipsValid(valid);
+              setDirty(true);
+            }}
+          />
+        </div>
+        {step === 3 && (
           <>
             <dl className="review-summary">
+              <div>
+                <dt>Voltas</dt>
+                <dd>
+                  {values.laps}
+                  {Number(values.laps) > 1
+                    ? ` · intervalo mínimo de ${values.min_lap_seconds} segundos`
+                    : ""}
+                </dd>
+              </div>
+              <div>
+                <dt>Chips</dt>
+                <dd>
+                  {chips
+                    ? `${chips.length} vínculos para importar`
+                    : race
+                      ? "Vínculos existentes preservados"
+                      : "Importar depois nas configurações"}
+                </dd>
+              </div>
               <div>
                 <dt>Evento</dt>
                 <dd>{values.name}</dd>
@@ -299,12 +401,27 @@ export function EventForm({
             Voltar
           </button>
         )}
-        <button className="primary" disabled={busy}>
+        {step === 2 && (
+          <button
+            type="button"
+            className="secondary"
+            disabled={busy}
+            onClick={() => {
+              setChipPickerKey((k) => k + 1);
+              setChips(null);
+              setChipsValid(true);
+              setStep(3);
+            }}
+          >
+            Pular e importar depois
+          </button>
+        )}
+        <button className="primary" disabled={busy || !chipsValid}>
           {busy
             ? "Salvando…"
             : savedId.current
               ? "Abrir evento salvo"
-              : step < 2
+              : step < 3
                 ? "Continuar"
                 : "Salvar evento"}
         </button>

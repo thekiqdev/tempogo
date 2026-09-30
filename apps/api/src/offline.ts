@@ -175,7 +175,7 @@ async function ingest(
   const duplicates = (
     await c.query(
       `SELECT id FROM app.observations WHERE organization_id=$1 AND event_id=$2 AND checkpoint_id=$3 AND bib=$4
- AND raw_captured_at BETWEEN $5::timestamptz-interval '5 seconds' AND $5::timestamptz+interval '5 seconds' AND id<>$6`,
+ AND raw_captured_at BETWEEN $5::timestamptz-interval '10 seconds' AND $5::timestamptz+interval '10 seconds' AND id<>$6`,
       [
         current.organization_id,
         current.event_id,

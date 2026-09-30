@@ -462,7 +462,7 @@ test("Sprint 02: captura manual, credenciais e concorrência", async (t) => {
         };
         const later = await capture(b, 4000),
           first = await capture(a, 0);
-        await capture(b, 8000);
+        await capture(b, 12000);
         const path = "/events/" + event + "/observations";
         const consolidated = await admin("GET", path + "?view=consolidated&bib=00888&limit=1");
         assert.equal(consolidated.statusCode, 200, consolidated.body);

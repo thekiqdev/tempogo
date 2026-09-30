@@ -10,5 +10,5 @@ export function passageTxtLine(bib: string, capturedAt: Date, timezone: string):
     hourCycle: "h23",
   }).formatToParts(capturedAt);
   const value = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)!.value;
-  return `${bib.padStart(24, "0")};${value("day")}/${value("month")}/${value("year")} ${value("hour")}:${value("minute")}:${value("second")}:${String(capturedAt.getUTCMilliseconds()).padStart(3, "0")}`;
+  return `${/^[0-9]+$/.test(bib) ? bib.padStart(24, "0") : bib};${value("day")}/${value("month")}/${value("year")} ${value("hour")}:${value("minute")}:${value("second")}:${String(capturedAt.getUTCMilliseconds()).padStart(3, "0")}`;
 }

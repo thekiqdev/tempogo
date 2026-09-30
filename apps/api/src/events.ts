@@ -3,6 +3,7 @@ import type pg from "pg";
 import { z } from "zod";
 import type { authService, Principal } from "./auth.js";
 import { audit, HttpError, transaction } from "./db.js";
+import { chipMappings, importChips } from "./event-chips.js";
 import { reconciliation } from "./management.js";
 
 const id = z.string().uuid(),
@@ -32,6 +33,9 @@ const eventInput = z
     timezone,
     location: z.string().trim().max(200).default(""),
     category_name: name,
+    laps: z.number().int().min(1).max(999).default(1),
+    min_lap_seconds: z.number().int().min(11).max(86400).default(60),
+    chip_mappings: chipMappings.optional(),
     distance_m: z.number().int().positive().max(1000000).nullable(),
   })
   .strict();
@@ -146,14 +150,23 @@ export function registerEvents(
       ).rows,
     }));
   });
-  app.post("/api/v1/events", async (req, reply) => {
+  app.post("/api/v1/events", { bodyLimit: 2 * 1024 * 1024 }, async (req, reply) => {
     const p = await auth.authenticate(req),
       v = eventInput.parse(req.body);
     const result = await scoped(p, async (c) => {
       const e = (
         await c.query<EventRow>(
-          "INSERT INTO app.events(organization_id,name,local_date,timezone,location,created_by) VALUES($1,$2,$3,$4,$5,$6) RETURNING *",
-          [p.organization_id, v.name, v.local_date, v.timezone, v.location, p.user_id],
+          "INSERT INTO app.events(organization_id,name,local_date,timezone,location,created_by,laps,min_lap_seconds) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *",
+          [
+            p.organization_id,
+            v.name,
+            v.local_date,
+            v.timezone,
+            v.location,
+            p.user_id,
+            v.laps,
+            v.min_lap_seconds,
+          ],
         )
       ).rows[0];
       if (!e) throw new Error("Evento não criado");
@@ -161,11 +174,50 @@ export function registerEvents(
         "INSERT INTO app.race_categories(organization_id,event_id,name,distance_m) VALUES($1,$2,$3,$4)",
         [p.organization_id, e.id, v.category_name, v.distance_m],
       );
+      if (v.chip_mappings)
+        await importChips(c, p.organization_id, e.id, v.chip_mappings, p.user_id, req.id);
       await audit(c, p.organization_id, p.user_id, "event.created", e.id, { after: v }, req.id);
       return { id: e.id };
     });
     reply.code(201);
     return result;
+  });
+  app.get("/api/v1/events/:id/chips", async (req) => {
+    const p = await auth.authenticate(req),
+      eid = id.parse((req.params as { id: string }).id);
+    return scoped(p, async (c) => {
+      await lock(c, p.organization_id, eid);
+      const total = Number(
+        (
+          await c.query(
+            "SELECT count(*) FROM app.event_chips WHERE organization_id=$1 AND event_id=$2",
+            [p.organization_id, eid],
+          )
+        ).rows[0].count,
+      );
+      const items = (
+        await c.query(
+          "SELECT bib,chip FROM app.event_chips WHERE organization_id=$1 AND event_id=$2 ORDER BY bib LIMIT 20",
+          [p.organization_id, eid],
+        )
+      ).rows;
+      return { total, items };
+    });
+  });
+  app.post("/api/v1/events/:id/chips", { bodyLimit: 2 * 1024 * 1024 }, async (req) => {
+    const p = await auth.authenticate(req),
+      eid = id.parse((req.params as { id: string }).id);
+    const v = z
+      .object({ rows: chipMappings.min(1) })
+      .strict()
+      .parse(req.body);
+    return scoped(p, async (c) => {
+      const event = await lock(c, p.organization_id, eid);
+      if (["finalized", "archived"].includes(event.state))
+        throw new HttpError(409, "EVENT_LOCKED", "Evento finalizado: reabra para importar chips.");
+      await importChips(c, p.organization_id, eid, v.rows, p.user_id, req.id);
+      return { imported: v.rows.length };
+    });
   });
   app.get("/api/v1/events/:id", async (req) => {
     const p = await auth.authenticate(req),
@@ -178,7 +230,7 @@ export function registerEvents(
       return e;
     });
   });
-  app.patch("/api/v1/events/:id", async (req) => {
+  app.patch("/api/v1/events/:id", { bodyLimit: 2 * 1024 * 1024 }, async (req) => {
     const p = await auth.authenticate(req),
       eid = id.parse((req.params as { id: string }).id),
       v = eventInput.extend({ expected_version }).parse(req.body);
@@ -192,9 +244,20 @@ export function registerEvents(
       );
       await validate(c, p.organization_id, eid);
       const result = await c.query(
-        "UPDATE app.events SET name=$1,local_date=$2,timezone=$3,location=$4,version=version+1 WHERE organization_id=$5 AND id=$6 RETURNING version",
-        [v.name, v.local_date, v.timezone, v.location, p.organization_id, eid],
+        "UPDATE app.events SET name=$1,local_date=$2,timezone=$3,location=$4,laps=$7,min_lap_seconds=$8,version=version+1 WHERE organization_id=$5 AND id=$6 RETURNING version",
+        [
+          v.name,
+          v.local_date,
+          v.timezone,
+          v.location,
+          p.organization_id,
+          eid,
+          v.laps,
+          v.min_lap_seconds,
+        ],
       );
+      if (v.chip_mappings)
+        await importChips(c, p.organization_id, eid, v.chip_mappings, p.user_id, req.id);
       await audit(
         c,
         p.organization_id,

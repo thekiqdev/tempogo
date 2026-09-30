@@ -1,4 +1,5 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
+import { HeaderActions } from "./page-header";
 import { useActionConfirmation } from "./platform-dialog";
 import { EntityFilter } from "./platform-filter";
 import { SuperadminCreate } from "./superadmin-create";
@@ -255,9 +256,11 @@ export function Accounts({
         />
       )}
       {onlySuper && !routeId && (
-        <button className="primary" onClick={() => setCreating(true)}>
-          Novo superadmin
-        </button>
+        <HeaderActions>
+          <button className="primary" onClick={() => setCreating(true)}>
+            Novo superadmin
+          </button>
+        </HeaderActions>
       )}
       {!routeId && (
         <>

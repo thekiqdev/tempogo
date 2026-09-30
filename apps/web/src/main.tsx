@@ -5,10 +5,12 @@ import { timezoneLabels } from "./admin-format";
 import { api, setCsrf } from "./api";
 import { AuditPanel } from "./audit-panel";
 import { AccessPanel } from "./capture-admin";
+import { EventChipSettings } from "./chip-import";
 import { CheckpointForm, EventForm } from "./event-forms";
 import { EventOverview } from "./event-overview";
 import { FieldApp } from "./field";
 import { ObservationPanel, ReconciliationPanel } from "./management-panel";
+import { HeaderActions, HeaderActionsContext, HeaderContent, HeaderContext } from "./page-header";
 import { PlatformApp } from "./platform";
 import { RecoveryPanel } from "./recovery-admin";
 import "./style.css";
@@ -343,9 +345,47 @@ function Detail({
     setError("");
     window.scrollTo(0, 0);
   }
+  const header = (
+    <HeaderContent>
+      <div className="organizer-heading">
+        <button
+          className="header-back"
+          onClick={onBack}
+          aria-label="Todos os eventos"
+          title="Todos os eventos"
+        >
+          ←
+        </button>
+        <div className="header-title-block">
+          <h1>
+            {cpEdit
+              ? cpEdit === "new"
+                ? "Novo checkpoint"
+                : "Editar checkpoint"
+              : edit
+                ? "Editar evento"
+                : race.name}
+          </h1>
+          <p className="header-metadata">
+            {(cpEdit || edit) && <span>{race.name}</span>}
+            <span>
+              {race.category_name}
+              {race.distance_m ? " · " + race.distance_m / 1000 + " km" : ""}
+            </span>
+            <span>{race.local_date.split("-").reverse().join("/")}</span>
+            {race.location && <span>{race.location}</span>}
+          </p>
+        </div>
+        <span className={"badge " + race.state}>
+          {race.paused_for_edit ? "Pausado para edição" : states[race.state]}
+        </span>
+      </div>
+    </HeaderContent>
+  );
   if (pointsError)
     return (
       <section className="panel">
+        {header}
         <button className="text-button" onClick={onBack}>
           ← Todos os eventos
         </button>
@@ -372,6 +412,7 @@ function Detail({
   if (cpEdit)
     return (
       <div className="focused-editor">
+        {header}
         <CheckpointForm
           key={typeof cpEdit === "string" ? "new" : cpEdit.id}
           checkpoint={typeof cpEdit === "string" ? undefined : cpEdit}
@@ -391,6 +432,7 @@ function Detail({
   if (edit)
     return (
       <div className="focused-editor">
+        {header}
         <EventForm
           race={race}
           onSave={async () => {
@@ -403,25 +445,7 @@ function Detail({
     );
   return (
     <>
-      <button className="text-button back" onClick={onBack}>
-        ← Todos os eventos
-      </button>
-      <div className="page-title event-heading">
-        <div>
-          <p className="eyebrow">
-            {race.category_name} ·{" "}
-            {race.distance_m ? race.distance_m / 1000 + " km" : "Distância não informada"}
-          </p>
-          <h1>{race.name}</h1>
-          <p className="muted">
-            {race.local_date.split("-").reverse().join("/")} ·{" "}
-            {race.location || "Local não informado"}
-          </p>
-        </div>
-        <span className={"badge " + race.state}>
-          {race.paused_for_edit ? "Pausado para edição" : states[race.state]}
-        </span>
-      </div>
+      {header}
       <ErrorMessage text={error} />
       <nav className="tabs admin-desktop-tabs" aria-label="Detalhes do evento">
         {[
@@ -522,9 +546,11 @@ function Detail({
                   Pontos do percurso <span className="count">{points.length}</span>
                 </h3>
                 {(race.state === "draft" || race.paused_for_edit) && (
-                  <button className="primary" onClick={() => setCpEdit("new")}>
-                    + Adicionar checkpoint
-                  </button>
+                  <HeaderActions>
+                    <button className="primary" onClick={() => setCpEdit("new")}>
+                      + Adicionar checkpoint
+                    </button>
+                  </HeaderActions>
                 )}
               </div>
               <p className="section-intro">
@@ -608,12 +634,23 @@ function Detail({
               <div className="section-title">
                 <h3>Dados e operação</h3>
                 {(race.state === "draft" || race.paused_for_edit) && (
-                  <button className="secondary" onClick={() => setEdit(true)}>
-                    Editar dados
-                  </button>
+                  <HeaderActions>
+                    <button className="secondary" onClick={() => setEdit(true)}>
+                      Editar dados
+                    </button>
+                  </HeaderActions>
                 )}
               </div>
               <dl className="review-summary">
+                <div>
+                  <dt>Voltas</dt>
+                  <dd>
+                    {race.laps ?? 1}
+                    {(race.laps ?? 1) > 1
+                      ? ` · intervalo mínimo de ${race.min_lap_seconds} segundos`
+                      : ""}
+                  </dd>
+                </div>
                 <div>
                   <dt>Data</dt>
                   <dd>{race.local_date.split("-").reverse().join("/")}</dd>
@@ -763,6 +800,12 @@ function Detail({
         </>
       )}
       {tab === "settings" && (
+        <EventChipSettings
+          eventId={race.id}
+          locked={["finalized", "archived"].includes(race.state)}
+        />
+      )}
+      {tab === "settings" && (
         <ReconciliationPanel eventId={race.id} version={race.version} state={race.state} />
       )}
       {tab === "audit" && <AuditPanel eventId={race.id} />}
@@ -776,6 +819,8 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
     [error, setError] = useState(""),
     [loading, setLoading] = useState(true),
     [offset, setOffset] = useState(0);
+  const [headerTarget, setHeaderTarget] = useState<HTMLElement | null>(null);
+  const [actionsTarget, setActionsTarget] = useState<HTMLDivElement | null>(null);
   async function refresh() {
     const r = await api<{ items: Race[] }>("/events?limit=20&offset=" + offset);
     setEvents(r.items);
@@ -832,114 +877,115 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
         </details>
       </aside>
       <main className="content">
-        <header className="topbar">
-          <span>Painel do organizador</span>
-          <span>Organize sua prova</span>
+        <header className="topbar organizer-topbar">
+          <div className="organizer-header-content" ref={setHeaderTarget}>
+            {!selected && (
+              <div className="header-title-block">
+                <h1>{create ? "Novo evento" : "Eventos"}</h1>
+              </div>
+            )}
+          </div>
+          <div className="header-actions" ref={setActionsTarget}>
+            {!create && !selected && (
+              <button className="primary" onClick={() => setCreate(true)}>
+                + Novo evento
+              </button>
+            )}
+          </div>
         </header>
-        <div className="page">
-          <ErrorMessage text={error} />
-          {create ? (
-            <>
-              <div className="page-title">
-                <div>
-                  <p className="eyebrow">PREPARAÇÃO DA PROVA</p>
-                  <h1>Novo evento</h1>
-                </div>
-              </div>
-              <EventForm
-                onSave={async (id) => {
-                  await refresh();
-                  await open(id, true);
-                }}
-                onCancel={() => setCreate(false)}
-              />
-            </>
-          ) : selected ? (
-            <Detail
-              key={selected.id}
-              race={selected}
-              onReload={async () => {
-                await open(selected.id, true);
-                await refresh();
-              }}
-              onBack={() => {
-                setSelected(null);
-                refresh().catch((e) => setError(e.message));
-              }}
-            />
-          ) : (
-            <>
-              <div className="page-title">
-                <div>
-                  <p className="eyebrow">SUA OPERAÇÃO COMEÇA AQUI</p>
-                  <h1>Eventos</h1>
-                  <p className="muted">Prepare cada etapa da sua próxima corrida.</p>
-                </div>
-                <button className="primary" onClick={() => setCreate(true)}>
-                  + Novo evento
-                </button>
-              </div>
-              {loading ? (
-                <p role="status">Carregando eventos…</p>
-              ) : events.length === 0 ? (
-                <section className="empty">
-                  <span className="empty-marker">01</span>
-                  <h2>Sua próxima prova começa aqui</h2>
-                  <p>Cadastre o evento e organize os checkpoints do percurso.</p>
-                  <button className="primary" onClick={() => setCreate(true)}>
-                    Criar primeiro evento
-                  </button>
-                </section>
+        <HeaderContext.Provider value={headerTarget}>
+          <HeaderActionsContext.Provider value={actionsTarget}>
+            <div className="page">
+              <ErrorMessage text={error} />
+              {create ? (
+                <>
+                  <EventForm
+                    onSave={async (id) => {
+                      await refresh();
+                      await open(id, true);
+                    }}
+                    onCancel={() => setCreate(false)}
+                  />
+                </>
+              ) : selected ? (
+                <Detail
+                  key={selected.id}
+                  race={selected}
+                  onReload={async () => {
+                    await open(selected.id, true);
+                    await refresh();
+                  }}
+                  onBack={() => {
+                    setSelected(null);
+                    refresh().catch((e) => setError(e.message));
+                  }}
+                />
               ) : (
-                <div className="events-list">
-                  {events.map((e) => (
-                    <button className="event-row" key={e.id} onClick={() => open(e.id)}>
-                      <div className="date-tile">
-                        <strong>{e.local_date.slice(8)}</strong>
-                        <span>
-                          {new Date(e.local_date + "T12:00:00")
-                            .toLocaleDateString("pt-BR", { month: "short" })
-                            .replace(".", "")}
-                        </span>
-                      </div>
-                      <div className="event-info">
-                        <h3>{e.name}</h3>
-                        <p>
-                          {e.location || "Local não informado"} ·{" "}
-                          {e.distance_m ? e.distance_m / 1000 + " km" : e.category_name}
-                        </p>
-                      </div>
-                      <span className={"badge " + e.state}>
-                        {e.paused_for_edit ? "Pausado para edição" : states[e.state]}
-                      </span>
-                      <span className="arrow">↗</span>
+                <>
+                  {loading ? (
+                    <p role="status">Carregando eventos…</p>
+                  ) : events.length === 0 ? (
+                    <section className="empty">
+                      <span className="empty-marker">01</span>
+                      <h2>Sua próxima prova começa aqui</h2>
+                      <p>Cadastre o evento e organize os checkpoints do percurso.</p>
+                      <button className="primary" onClick={() => setCreate(true)}>
+                        Criar primeiro evento
+                      </button>
+                    </section>
+                  ) : (
+                    <div className="events-list">
+                      {events.map((e) => (
+                        <button className="event-row" key={e.id} onClick={() => open(e.id)}>
+                          <div className="date-tile">
+                            <strong>{e.local_date.slice(8)}</strong>
+                            <span>
+                              {new Date(e.local_date + "T12:00:00")
+                                .toLocaleDateString("pt-BR", { month: "short" })
+                                .replace(".", "")}
+                            </span>
+                          </div>
+                          <div className="event-info">
+                            <h3>{e.name}</h3>
+                            <p>
+                              {e.location || "Local não informado"} ·{" "}
+                              {e.distance_m ? e.distance_m / 1000 + " km" : e.category_name}
+                            </p>
+                          </div>
+                          <span className={"badge " + e.state}>
+                            {e.paused_for_edit ? "Pausado para edição" : states[e.state]}
+                          </span>
+                          <span className="arrow">↗</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <div className="pagination">
+                    <button
+                      className="secondary"
+                      disabled={offset === 0}
+                      onClick={() => setOffset(Math.max(0, offset - 20))}
+                    >
+                      Anterior
                     </button>
-                  ))}
-                </div>
+                    <span>Página {offset / 20 + 1}</span>
+                    <button
+                      className="secondary"
+                      disabled={events.length < 20}
+                      onClick={() => setOffset(offset + 20)}
+                    >
+                      Próxima
+                    </button>
+                  </div>
+                  <p className="footnote">
+                    Cada evento pertence à sua organização. Alterações ficam registradas no
+                    histórico.
+                  </p>
+                </>
               )}
-              <div className="pagination">
-                <button
-                  className="secondary"
-                  disabled={offset === 0}
-                  onClick={() => setOffset(Math.max(0, offset - 20))}
-                >
-                  Anterior
-                </button>
-                <span>Página {offset / 20 + 1}</span>
-                <button
-                  className="secondary"
-                  disabled={events.length < 20}
-                  onClick={() => setOffset(offset + 20)}
-                >
-                  Próxima
-                </button>
-              </div>
-              <p className="footnote">
-                Cada evento pertence à sua organização. Alterações ficam registradas no histórico.
-              </p>
-            </>
-          )}
-        </div>
+            </div>
+          </HeaderActionsContext.Provider>
+        </HeaderContext.Provider>
       </main>
     </div>
   );

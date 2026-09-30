@@ -153,6 +153,14 @@ async function capture(name) {
 }
 try {
   await page.goto(base);
+  await expect(
+    page.locator(".organizer-topbar").getByRole("heading", { name: "Eventos", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.locator(".organizer-topbar").getByRole("button", { name: "+ Novo evento", exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("Painel do organizador", { exact: true })).toHaveCount(0);
+  await capture("00-eventos-header");
   await page.getByRole("button", { name: "+ Novo evento", exact: true }).click();
   await page.getByLabel("Nome do evento").fill("Corrida do Parque — edição especial da comunidade");
   const eventDistance = page.getByLabel("Distância (km, opcional)");
@@ -172,6 +180,8 @@ try {
   await page.getByRole("button", { name: "Continuar", exact: true }).click();
   await expect(page.getByLabel("Data da prova")).toHaveValue("2026-10-04");
   await page.getByRole("button", { name: "Continuar", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Vincule os chips aos peitos" })).toBeVisible();
+  await page.getByRole("button", { name: "Pular e importar depois", exact: true }).click();
   await capture("03-conferencia");
   await page.getByRole("button", { name: "Salvar evento", exact: true }).click();
   await expect(
@@ -347,6 +357,11 @@ try {
   await expect(page.locator(".access-list li")).toHaveCount(2);
   await expect(page.locator(".access-list")).toContainText("Ana Souza");
   await expect(page.locator(".access-list")).toContainText("Bruno Lima");
+  await expect(
+    page.locator(".organizer-topbar").getByRole("button", { name: "+ Novo acesso", exact: true }),
+  ).toBeVisible();
+  await expect(page.locator(".organizer-topbar h1")).toHaveText(race.name);
+  await expect(page.locator(".page .event-heading")).toHaveCount(0);
   await capture("11-acessos-equipe-desktop");
   await page.setViewportSize({ width: 390, height: 844 });
   await capture("12-acessos-equipe-mobile");

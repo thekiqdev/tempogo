@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { HeaderActionsContext } from "./page-header";
 import { Accounts } from "./platform-accounts";
 import { useActionConfirmation } from "./platform-dialog";
 import { PlatformIcon } from "./platform-icons";
@@ -29,6 +30,7 @@ export function PlatformWorkspace({
   onLogout: () => void;
 }) {
   const mfaRequired = useMfaRequired();
+  const [actionsTarget, setActionsTarget] = useState<HTMLDivElement | null>(null);
   const [path, setPath] = useState(location.pathname),
     [menu, setMenu] = useState(false),
     [collapsed, setCollapsed] = useState(() => {
@@ -241,9 +243,8 @@ export function PlatformWorkspace({
           >
             <PlatformIcon name="sidebar" />
           </button>
-          <span className="crm-topbar-context">
-            Administração <span>/ {current?.[1] ?? "Plataforma"}</span>
-          </span>
+          <h1 className="crm-header-title">{current?.[1] ?? "Plataforma"}</h1>
+          <div className="header-actions crm-header-actions" ref={setActionsTarget} />
           <details className="crm-account">
             <summary aria-label={"Conta: " + user}>
               <span className="crm-avatar" aria-hidden="true">
@@ -266,44 +267,47 @@ export function PlatformWorkspace({
             </div>
           </details>
         </header>
-        <main id="platform-content" className="crm-content" tabIndex={-1}>
-          {notice && (
-            <p role="status" className="crm-notice">
-              {notice}
-            </p>
-          )}
-          <h1 className="platform-sr-only">{current?.[1] ?? "Página não encontrada"}</h1>
-          {path.split("/")[3] && (
-            <p className="crm-breadcrumb">Plataforma / {current?.[1] ?? "Página não encontrada"}</p>
-          )}
-          {section === "" ? (
-            <OverviewPanel />
-          ) : section === "organizacoes" ? (
-            <Organizations csrf={csrf} routeId={path.split("/")[3] ?? ""} />
-          ) : section === "super-admins" ? (
-            <Accounts
-              key={section}
-              csrf={csrf}
-              onlySuper={section === "super-admins"}
-              routeId={path.split("/")[3] ?? ""}
-            />
-          ) : section === "pessoas" ? (
-            <p>
-              Os acessos agora são gerenciados dentro da organização.{" "}
-              <a href="/plataforma/organizacoes">Selecionar organização</a>
-            </p>
-          ) : section === "convites" ? (
-            <InvitationDirectory csrf={csrf} />
-          ) : section === "configuracoes" ? (
-            <PlatformSettings csrf={csrf} />
-          ) : section === "auditoria" ? (
-            <AuditPanel />
-          ) : (
-            <p>
-              Este endereço não existe. <a href="/plataforma">Voltar à visão geral</a>
-            </p>
-          )}
-        </main>
+        <HeaderActionsContext.Provider value={actionsTarget}>
+          <main id="platform-content" className="crm-content" tabIndex={-1}>
+            {notice && (
+              <p role="status" className="crm-notice">
+                {notice}
+              </p>
+            )}
+            {path.split("/")[3] && (
+              <p className="crm-breadcrumb">
+                Plataforma / {current?.[1] ?? "Página não encontrada"}
+              </p>
+            )}
+            {section === "" ? (
+              <OverviewPanel />
+            ) : section === "organizacoes" ? (
+              <Organizations csrf={csrf} routeId={path.split("/")[3] ?? ""} />
+            ) : section === "super-admins" ? (
+              <Accounts
+                key={section}
+                csrf={csrf}
+                onlySuper={section === "super-admins"}
+                routeId={path.split("/")[3] ?? ""}
+              />
+            ) : section === "pessoas" ? (
+              <p>
+                Os acessos agora são gerenciados dentro da organização.{" "}
+                <a href="/plataforma/organizacoes">Selecionar organização</a>
+              </p>
+            ) : section === "convites" ? (
+              <InvitationDirectory csrf={csrf} />
+            ) : section === "configuracoes" ? (
+              <PlatformSettings csrf={csrf} />
+            ) : section === "auditoria" ? (
+              <AuditPanel />
+            ) : (
+              <p>
+                Este endereço não existe. <a href="/plataforma">Voltar à visão geral</a>
+              </p>
+            )}
+          </main>
+        </HeaderActionsContext.Provider>
       </div>
     </div>
   );

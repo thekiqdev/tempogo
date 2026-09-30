@@ -1,5 +1,6 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { OrganizationMembers } from "./organization-members";
+import { HeaderActions } from "./page-header";
 import { useActionConfirmation } from "./platform-dialog";
 import { AuditPanel } from "./platform-overview";
 
@@ -306,9 +307,11 @@ export function Organizations({ csrf, routeId = "" }: { csrf: string; routeId?: 
               <h2>Organizações cadastradas</h2>
               <p>Localize um cadastro ou crie uma nova organização.</p>
             </div>
-            <button className="primary" disabled={busy} onClick={() => go("nova")}>
-              Nova organização
-            </button>
+            <HeaderActions>
+              <button className="primary" disabled={busy} onClick={() => go("nova")}>
+                Nova organização
+              </button>
+            </HeaderActions>
           </div>
           <form
             className="organization-search"

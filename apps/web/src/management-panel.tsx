@@ -1,6 +1,7 @@
 import type { Checkpoint } from "@tempogo/contracts";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { api } from "./api";
+import { HeaderActions } from "./page-header";
 
 type Observation = {
   id: string;
@@ -15,6 +16,11 @@ type Observation = {
   evidence_version: number;
   operator_name?: string;
   access_label?: string;
+  chip?: string | null;
+  lap_number?: number | null;
+  total_laps?: number;
+  lap_too_soon?: boolean;
+  lap_exceeded?: boolean;
   observation_count?: number;
   members?: {
     id: string;
@@ -197,15 +203,18 @@ export function ObservationPanel({ eventId, points }: { eventId: string; points:
           <h2>Passagens manuais</h2>
           <p>Acompanhe os registros e revise quando necessário.</p>
         </div>
-        <button className="secondary" onClick={() => refresh().catch((e) => setError(e.message))}>
-          Atualizar passagens
-        </button>
+        <HeaderActions>
+          <button className="secondary" onClick={() => refresh().catch((e) => setError(e.message))}>
+            Atualizar passagens
+          </button>
+        </HeaderActions>
       </div>
       <details className="passages-explainer">
         <summary>Como funciona o agrupamento?</summary>
         <p>
-          Para o mesmo número e checkpoint, registros em até 5 segundos são agrupados pela primeira
-          captura. Os originais e a opção de revisão permanecem disponíveis.
+          Para o mesmo número e checkpoint, registros em até 10 segundos são agrupados pela primeira
+          captura. A próxima volta respeita o intervalo mínimo configurado no evento. Capturas
+          antecipadas não avançam a volta. Os originais e a revisão permanecem disponíveis.
         </p>
       </details>
       <form className="review-filters panel" onSubmit={filter}>
@@ -275,8 +284,9 @@ export function ObservationPanel({ eventId, points }: { eventId: string; points:
       </div>
       <div className="passages-export-note">
         <span>
-          TXT: número com 24 posições; data e hora com milissegundos no fuso do evento. Respeita os
-          filtros e a visualização selecionada.
+          TXT: chip vinculado (ou peito sem vínculo); identificadores numéricos com 24 posições;
+          data e hora com milissegundos no fuso do evento. Respeita os filtros e a visualização
+          selecionada.
         </span>
         <button className="text-button" disabled={busy || !data} onClick={() => download("csv")}>
           Exportar CSV detalhado
@@ -292,11 +302,21 @@ export function ObservationPanel({ eventId, points }: { eventId: string; points:
       <ul className="passage-list">
         {data?.items.map((i) => (
           <li key={i.id}>
-            <strong className="passage-bib">{i.effective_bib}</strong>
+            <div className="passage-identity">
+              <strong className="passage-bib">{i.effective_bib}</strong>
+              {i.lap_number != null && (
+                <small>
+                  Volta {i.lap_number} de {i.total_laps ?? 1}
+                </small>
+              )}
+              {i.lap_too_soon && <small className="lap-warning">Antes do intervalo mínimo</small>}
+              {i.lap_exceeded && <small className="lap-warning">Além das voltas previstas</small>}
+            </div>
             <div className="passage-origin">
               <b>{i.checkpoint_name}</b>
               <small>{i.operator_name || "Operador não informado"}</small>
               <small>{i.access_label || "Aparelho não informado"}</small>
+              <small>Chip: {i.chip ?? "Não vinculado"}</small>
               {(i.observation_count ?? 1) > 1 && (
                 <strong className="consolidation-count">
                   {i.observation_count} registros agrupados

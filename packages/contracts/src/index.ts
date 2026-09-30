@@ -21,6 +21,8 @@ export type RaceEvent = {
   distance_m: number | null;
   gun_start_at: string | null;
   paused_for_edit?: boolean;
+  laps?: number;
+  min_lap_seconds?: number;
 };
 export type Checkpoint = {
   online_devices?: number;

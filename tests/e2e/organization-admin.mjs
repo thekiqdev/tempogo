@@ -193,7 +193,13 @@ try {
   await expect(page.locator(".crm-main")).not.toHaveAttribute("inert", "");
   await page.getByRole("button", { name: "Expandir painel lateral" }).click();
   await page.setViewportSize({ width: 1366, height: 768 });
-  await page.getByRole("button", { name: "Nova organização", exact: true }).click();
+  await expect(
+    page.locator(".crm-topbar").getByRole("heading", { name: "Organizações", exact: true }),
+  ).toBeVisible();
+  await page
+    .locator(".crm-topbar")
+    .getByRole("button", { name: "Nova organização", exact: true })
+    .click();
   await expect(page.getByLabel("Telefone", { exact: true })).not.toBeVisible();
   await page.evaluate(() => window.scrollTo(0, 0));
   await expect(
@@ -319,7 +325,10 @@ try {
     .locator(".crm-sidebar")
     .getByRole("link", { name: "Super admins", exact: true })
     .click();
-  await page.getByRole("button", { name: "Novo superadmin", exact: true }).click();
+  await page
+    .locator(".crm-topbar")
+    .getByRole("button", { name: "Novo superadmin", exact: true })
+    .click();
   await page
     .getByLabel("Email do novo superadmin", { exact: true })
     .fill("direct-admin@organization.test");
