@@ -49,4 +49,16 @@ No terminal, na pasta `/app`, execute `npm run superadmin:create`. Usa MIGRATION
 
 Entre em `/plataforma` com o email e a senha escolhidos. Cadastre o autenticador MFA no primeiro acesso e guarde os códigos de recuperação. O email funciona como identificador de login; o comando não exige SMTP. As funções normais de convite e recuperação por email continuam dependendo de SMTP.
 
-O comando só permite o primeiro superadmin. Recusa bootstrap anterior e email de conta já existente, sem sobrescrever senhas ou conceder privilégios a uma identidade existente.
+Sem `SUPERADMIN_FORCE_RESET`, o comando só permite o primeiro superadmin. Recusa bootstrap anterior e email de conta já existente.
+
+## Recuperar senha ou promover conta existente
+
+Se a senha do superadmin foi perdida, ou se o email já existe como organizador e precisa virar superadmin, configure também:
+
+```env
+SUPERADMIN_EMAIL=seu-email@seu-dominio.com.br
+SUPERADMIN_PASSWORD=ESCOLHA_UMA_SENHA_DE_12_A_128_CARACTERES
+SUPERADMIN_FORCE_RESET=true
+```
+
+Execute `npm run superadmin:create`. Com o flag, o comando redefine a senha, garante o privilégio de superadmin, reativa a conta se estiver bloqueada, limpa MFA/códigos de recuperação e encerra sessões antigas. Em seguida entre em `/plataforma`, cadastre o Authenticator novamente e remova as três variáveis do ambiente.

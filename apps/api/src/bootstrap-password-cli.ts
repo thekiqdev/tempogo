@@ -24,13 +24,18 @@ try {
       "Configure a conexão administrativa em MIGRATION_DATABASE_URL ou DATABASE_URL.",
     );
   pool = new pg.Pool({ connectionString, connectionTimeoutMillis: 5000 });
+  const forceFlag = (process.env.SUPERADMIN_FORCE_RESET ?? "").trim().toLowerCase();
+  const force = forceFlag === "true" || forceFlag === "1" || forceFlag === "yes";
   await bootstrapPlatformWithPassword(
     pool,
     input.data.SUPERADMIN_EMAIL,
     input.data.SUPERADMIN_PASSWORD,
+    { force },
   );
   console.log(
-    "Primeiro superadmin criado sem envio de email. Acesse /plataforma com o email e a senha e configure MFA. Remova SUPERADMIN_PASSWORD e SUPERADMIN_EMAIL do ambiente após concluir.",
+    force
+      ? "Recuperação concluída: senha redefinida, privilégio de superadmin garantido e MFA limpo. Acesse /plataforma, configure o Authenticator e remova SUPERADMIN_PASSWORD, SUPERADMIN_EMAIL e SUPERADMIN_FORCE_RESET do ambiente."
+      : "Primeiro superadmin criado sem envio de email. Acesse /plataforma com o email e a senha e configure MFA. Remova SUPERADMIN_PASSWORD e SUPERADMIN_EMAIL do ambiente após concluir.",
   );
 } catch (e) {
   const message = e instanceof Error ? e.message : "";

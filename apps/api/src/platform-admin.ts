@@ -74,39 +74,90 @@ export async function bootstrapPlatformWithPassword(
   pool: pg.Pool,
   email: string,
   password: string,
+  options?: { force?: boolean },
 ) {
   const hash = await hashPassword(password);
+  const force = options?.force === true;
+  let outcome: "created" | "recovered" = "created";
   await transaction(pool, async (c) => {
     await c.query("SELECT pg_advisory_xact_lock(730207)");
-    if (
-      (
-        await c.query(
-          "SELECT 1 FROM app.platform_bootstrap UNION ALL SELECT 1 FROM app.platform_privileges LIMIT 1",
-        )
-      ).rowCount
-    )
-      throw new Error("Bootstrap já realizado. Este comando não redefine contas existentes.");
-    if ((await c.query("SELECT 1 FROM app.users WHERE email=$1", [email])).rowCount)
-      throw new Error(
-        "Email já pertence a uma conta. Use um email novo para o primeiro superadmin.",
+    const existing = (
+      await c.query("SELECT id,active FROM app.users WHERE email=$1 FOR UPDATE", [email])
+    ).rows[0] as { id: string; active: boolean } | undefined;
+    if (!force) {
+      if (
+        (
+          await c.query(
+            "SELECT 1 FROM app.platform_bootstrap UNION ALL SELECT 1 FROM app.platform_privileges LIMIT 1",
+          )
+        ).rowCount
+      )
+        throw new Error(
+          "Bootstrap já realizado. Este comando não redefine contas existentes. Defina SUPERADMIN_FORCE_RESET=true para redefinir senha e privilégio.",
+        );
+      if (existing)
+        throw new Error(
+          "Email já pertence a uma conta. Use um email novo para o primeiro superadmin ou SUPERADMIN_FORCE_RESET=true para recuperar.",
+        );
+    }
+    let userId: string;
+    if (existing) {
+      outcome = "recovered";
+      await c.query(
+        "UPDATE app.users SET password_hash=$2,active=true,must_change_password=false,version=version+1 WHERE id=$1",
+        [existing.id, hash],
       );
-    const user = (
-      await c.query("INSERT INTO app.users(email,password_hash) VALUES($1,$2) RETURNING id", [
-        email,
-        hash,
-      ])
-    ).rows[0];
-    await c.query("INSERT INTO app.platform_privileges(user_id,state) VALUES($1,'invited')", [
-      user.id,
+      userId = existing.id;
+    } else {
+      const user = (
+        await c.query("INSERT INTO app.users(email,password_hash) VALUES($1,$2) RETURNING id", [
+          email,
+          hash,
+        ])
+      ).rows[0];
+      userId = user.id;
+    }
+    await c.query(
+      "INSERT INTO app.platform_privileges(user_id,state) VALUES($1,'invited') ON CONFLICT(user_id) DO UPDATE SET state='invited',recovery_pending=false,version=app.platform_privileges.version+1",
+      [userId],
+    );
+    await c.query("INSERT INTO app.platform_bootstrap(user_id) VALUES($1) ON CONFLICT DO NOTHING", [
+      userId,
     ]);
-    await c.query("INSERT INTO app.platform_bootstrap(user_id) VALUES($1)", [user.id]);
+    if (force || existing) {
+      await c.query("DELETE FROM app.platform_mfa WHERE user_id=$1", [userId]);
+      await c.query("DELETE FROM app.platform_recovery_codes WHERE user_id=$1", [userId]);
+      await c.query(
+        "UPDATE app.platform_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL",
+        [userId],
+      );
+      await c.query(
+        "UPDATE app.platform_challenges SET used_at=now() WHERE user_id=$1 AND used_at IS NULL",
+        [userId],
+      );
+      await c.query(
+        "UPDATE app.platform_mfa_resets SET used_at=now() WHERE user_id=$1 AND used_at IS NULL",
+        [userId],
+      );
+      await c.query(
+        "UPDATE app.password_tokens SET used_at=now() WHERE user_id=$1 AND used_at IS NULL",
+        [userId],
+      );
+      await c.query(
+        "UPDATE app.sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL",
+        [userId],
+      );
+    }
     await platformAudit(
       c,
       null,
-      user.id,
-      "bootstrap.executed",
+      userId,
+      force || existing ? "bootstrap.force_reset" : "bootstrap.executed",
       undefined,
-      "Provisionamento inicial com senha por comando técnico, sem SMTP",
+      force || existing
+        ? "Recuperação técnica: senha redefinida, privilégio de superadmin garantido e MFA limpo, sem SMTP"
+        : "Provisionamento inicial com senha por comando técnico, sem SMTP",
     );
   });
+  return outcome;
 }
