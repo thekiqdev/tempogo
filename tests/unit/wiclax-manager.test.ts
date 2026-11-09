@@ -12,7 +12,7 @@ test("lanAddresses retorna apenas IPv4 públicos da máquina ou lista vazia", ()
 });
 
 test("WICLAX_ADVERTISE_IP fica em destaque mesmo com outros endereços", () => {
-  const preferred = "172.18.0.6";
+  const preferred = "13.140.182.124";
   const list = lanAddresses({
     NODE_ENV: "production",
     WICLAX_ADVERTISE_IP: preferred,
@@ -20,13 +20,13 @@ test("WICLAX_ADVERTISE_IP fica em destaque mesmo com outros endereços", () => {
   assert.equal(list[0], preferred);
 });
 
-test("status inicial de checkpoint sem bridge ativo", () => {
+test("status inicial de evento sem bridge ativo", async () => {
   const id = "00000000-0000-4000-8000-000000000099";
-  const s = getWiclaxStatus(id);
+  const s = await getWiclaxStatus(id);
   assert.equal(s.active, false);
-  assert.equal(s.checkpoint_id, id);
-  assert.equal(s.event_id, null);
+  assert.equal(s.event_id, id);
   assert.equal(s.port, null);
   assert.equal(s.clients, 0);
   assert.ok(Array.isArray(s.addresses));
+  assert.ok(Array.isArray(s.sources));
 });

@@ -5,11 +5,7 @@ import type { authService, Principal } from "./auth.js";
 import { audit, HttpError, transaction } from "./db.js";
 import { chipMappings, importChips } from "./event-chips.js";
 import { reconciliation } from "./management.js";
-import {
-  getWiclaxStatus,
-  startWiclaxForCheckpoint,
-  stopWiclaxForCheckpoint,
-} from "./wiclax-manager.js";
+import { getWiclaxStatus, startWiclaxForEvent, stopWiclaxForEvent } from "./wiclax-manager.js";
 
 const id = z.string().uuid(),
   name = z.string().trim().min(2).max(120);
@@ -605,54 +601,47 @@ export function registerEvents(
       };
     });
   });
-  async function assertCheckpoint(p: Principal, checkpointId: string) {
-    return scoped(p, async (c) => {
-      const row = (
-        await c.query<{ id: string; event_id: string }>(
-          "SELECT id,event_id FROM app.checkpoints WHERE organization_id=$1 AND id=$2",
-          [p.organization_id, checkpointId],
-        )
-      ).rows[0];
-      if (!row) throw new HttpError(404, "NOT_FOUND", "Checkpoint não encontrado");
-      await lock(c, p.organization_id, row.event_id);
-      return row;
+  app.get("/api/v1/events/:id/wiclax", async (req) => {
+    const p = await auth.authenticate(req),
+      eid = id.parse((req.params as { id: string }).id);
+    await scoped(p, async (c) => {
+      await lock(c, p.organization_id, eid);
     });
-  }
-  app.get("/api/v1/checkpoints/:id/wiclax", async (req) => {
-    const p = await auth.authenticate(req),
-      cid = id.parse((req.params as { id: string }).id);
-    await assertCheckpoint(p, cid);
-    return getWiclaxStatus(cid);
+    return getWiclaxStatus(eid, pool, p.organization_id);
   });
-  app.post("/api/v1/checkpoints/:id/wiclax/connect", async (req) => {
+  app.post("/api/v1/events/:id/wiclax/connect", async (req) => {
     const p = await auth.authenticate(req),
-      cid = id.parse((req.params as { id: string }).id);
+      eid = id.parse((req.params as { id: string }).id);
     const body = z
       .object({ port: z.number().int().min(1024).max(65535).default(3097) })
       .strict()
       .parse(req.body ?? {});
-    await assertCheckpoint(p, cid);
-    const status = await startWiclaxForCheckpoint(pool, p.organization_id, cid, body.port);
+    await scoped(p, async (c) => {
+      await lock(c, p.organization_id, eid);
+    });
+    const status = await startWiclaxForEvent(pool, p.organization_id, eid, body.port);
     await scoped(p, async (c) => {
       await audit(
         c,
         p.organization_id,
         p.user_id,
         "wiclax.connect",
-        cid,
-        { port: status.port, event_id: status.event_id },
+        eid,
+        { port: status.port },
         req.id,
       );
     });
     return status;
   });
-  app.post("/api/v1/checkpoints/:id/wiclax/disconnect", async (req) => {
+  app.post("/api/v1/events/:id/wiclax/disconnect", async (req) => {
     const p = await auth.authenticate(req),
-      cid = id.parse((req.params as { id: string }).id);
-    await assertCheckpoint(p, cid);
-    const status = await stopWiclaxForCheckpoint(p.organization_id, cid);
+      eid = id.parse((req.params as { id: string }).id);
     await scoped(p, async (c) => {
-      await audit(c, p.organization_id, p.user_id, "wiclax.disconnect", cid, {}, req.id);
+      await lock(c, p.organization_id, eid);
+    });
+    const status = await stopWiclaxForEvent(p.organization_id, eid, pool);
+    await scoped(p, async (c) => {
+      await audit(c, p.organization_id, p.user_id, "wiclax.disconnect", eid, {}, req.id);
     });
     return status;
   });

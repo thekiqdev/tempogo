@@ -1,6 +1,6 @@
 # TempoGo — integração com Wiclax (aquisição de passagens)
 
-Data: 06/11/2026 (atualizado 09/11/2026). Status: **WX-01** entregue; **WX-03/WX-04** (conectar por checkpoint, sanfona Integrações) entregue; WX-02 pendente.
+Data: 06/11/2026 (atualizado 09/11/2026). Status: **P1 produção** entregue — 1 porta por evento + Source por checkpoint; WX-02/P3 homologação pendente.
 
 ## Objetivo
 
@@ -90,38 +90,47 @@ Tarefas:
 
 **Aceite:** operador consegue subir o bridge e conectar o Wiclax em &lt; 10 minutos com o checklist.
 
-### WX-03 / WX-04 — Produto (painel por checkpoint)
+### WX-03 / WX-04 — (superseded) painel por checkpoint
 
-**Entrega:** integração Wiclax **por checkpoint** (vários sockets no mesmo evento). UI na sanfona **Integrações** no fim da página do checkpoint (edição e acessos).
+Substituído pelo modelo P1 abaixo (1 porta + Source).
+
+### P1 — Produção: 1 porta por evento + Source
+
+**Entrega:** um bridge TCP por **evento**; todas as passagens dos checkpoints usam Source = nome do ponto. UI em Configuração → **Integrações**.
 
 Tarefas:
 
-- [x] API `GET/POST .../checkpoints/:id/wiclax` (status, connect, disconnect).
-- [x] Bridge filtra passagens só daquele checkpoint; uma porta por checkpoint.
-- [x] Remover conexão no nível do evento.
-- [x] Sanfona Integrações no fim da página do checkpoint.
-- [ ] Persistência da preferência “manter conectado” / porta por checkpoint (opcional).
-- [ ] Empacotar XML de aquisição customizada “TempoGo” (opcional).
+- [x] API `GET/POST .../events/:id/wiclax`.
+- [x] Bridge filtra por `event_id`; Source = nome do checkpoint.
+- [x] Sanfona Integrações no evento com lista de Sources.
+- [x] `WICLAX_ADVERTISE_IP` para destacar o IP público da VPS.
+- [ ] P2: publicar TCP na VPS + checklist firewall.
+- [ ] P3: homologação com Wiclax e celular 4G.
 
-**Aceite:** organizador conecta cada checkpoint com IP/porta próprios; no Wiclax, uma aquisição por checkpoint.
+**Aceite:** uma aquisição no Wiclax; destinos mapeados por Source; N checkpoints sem N portas.
 
-**Uso no painel:** Checkpoint → **Integrações** → Conectar → copiar IP/porta → no Wiclax Ligar + Começar a leitura.
+**Uso:** Evento → Configuração → Integrações → Conectar → copiar IP/porta → no Wiclax Ligar + Começar a leitura → mapear Source.
 
-CLI: `WICLAX_CHECKPOINT_ID` + `npm run wiclax:bridge`.
+**Produção (P2):**
+
+```env
+WICLAX_ADVERTISE_IP=13.140.182.124
+# Publicar a porta TCP do bridge (ex. 3097) no Docker/Easypanel + firewall
+```
+
+CLI: `WICLAX_EVENT_ID` + `npm run wiclax:bridge`.
 
 ## Decisões
 
-| Tema | Decisão MVP |
+| Tema | Decisão atual |
 | --- | --- |
 | Papel de rede | TempoGo = servidor TCP; Wiclax = cliente |
-| Processo | Bridge separado da API HTTP (`wiclax:bridge`) |
-| Qual passagem enviar | Não invalidadas; horário efetivo (revisão se houver) |
+| Escopo | Um bridge por evento; Source diferencia checkpoint |
+| Porta | Uma por evento (padrão 3097) |
 | Identificador | Chip se cadastrado; senão peito |
-| Origem | Nome do checkpoint |
-| Gatilho de envio | Após `STARTREAD`; fila interna desde a conexão/cursor |
-| Segurança | Só LAN/VPN; sem auth no socket nesta etapa |
-| Escopo | Um bridge TCP por checkpoint (`WICLAX_CHECKPOINT_ID` / painel) |
-| IP em destaque | `WICLAX_ADVERTISE_IP` (ex.: `172.18.0.6`). Sem isso, em `NODE_ENV=production` prioriza IPs Docker `172.16–31`; em local prioriza LAN `192.168`/`10` |
+| Origem (Source) | Nome do checkpoint |
+| Gatilho de envio | Após `STARTREAD` |
+| IP em destaque | `WICLAX_ADVERTISE_IP` (IP da VPS em produção) |
 
 ## Riscos
 

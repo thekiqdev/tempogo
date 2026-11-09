@@ -12,7 +12,6 @@ export type WiclaxBridgeOptions = {
   pool: pg.Pool;
   organizationId: string;
   eventId: string;
-  checkpointId: string;
   host?: string;
   port?: number;
   pollMs?: number;
@@ -35,11 +34,11 @@ type PassingRow = {
   checkpoint_name: string;
 };
 
-type CheckpointContext = {
+export type EventWiclaxContext = {
   event_id: string;
   event_name: string;
   timezone: string;
-  checkpoint_name: string;
+  sources: { id: string; name: string; kind: string; sequence: number }[];
 };
 
 const passingQuery = `SELECT v.id,
@@ -63,29 +62,34 @@ const passingQuery = `SELECT v.id,
    LEFT JOIN app.event_chips chips
      ON chips.organization_id=o.organization_id AND chips.event_id=o.event_id
     AND chips.bib=coalesce(r.bib,o.bib)
-   WHERE o.event_id=$1 AND o.checkpoint_id=$2
+   WHERE o.event_id=$1
  ) v
  WHERE v.disposition<>'invalidated'`;
 
-export async function loadCheckpointContext(
+export async function loadEventWiclaxContext(
   pool: pg.Pool,
   organizationId: string,
-  checkpointId: string,
-): Promise<CheckpointContext> {
+  eventId: string,
+): Promise<EventWiclaxContext> {
   return transaction(
     pool,
     async (c) => {
-      const row = (
-        await c.query<CheckpointContext>(
-          `SELECT e.id AS event_id, e.name AS event_name, e.timezone, p.name AS checkpoint_name
-           FROM app.checkpoints p
-           JOIN app.events e ON e.organization_id=p.organization_id AND e.id=p.event_id
-           WHERE p.organization_id=$1 AND p.id=$2`,
-          [organizationId, checkpointId],
+      const event = (
+        await c.query<{ event_id: string; event_name: string; timezone: string }>(
+          "SELECT id AS event_id, name AS event_name, timezone FROM app.events WHERE organization_id=$1 AND id=$2",
+          [organizationId, eventId],
         )
       ).rows[0];
-      if (!row) throw new Error("Checkpoint não encontrado para o bridge Wiclax.");
-      return row;
+      if (!event) throw new Error("Evento não encontrado para o bridge Wiclax.");
+      const sources = (
+        await c.query<{ id: string; name: string; kind: string; sequence: number }>(
+          `SELECT id,name,kind,sequence FROM app.checkpoints
+           WHERE organization_id=$1 AND event_id=$2 AND active
+           ORDER BY sequence,id`,
+          [organizationId, eventId],
+        )
+      ).rows;
+      return { ...event, sources };
     },
     organizationId,
   );
@@ -95,7 +99,6 @@ async function fetchNew(
   pool: pg.Pool,
   organizationId: string,
   eventId: string,
-  checkpointId: string,
   afterReceived: Date | null,
 ): Promise<PassingRow[]> {
   return transaction(
@@ -104,8 +107,8 @@ async function fetchNew(
       const rows = (
         await c.query<PassingRow>(
           passingQuery +
-            " AND ($3::timestamptz IS NULL OR v.received_at>$3) ORDER BY v.received_at,v.id LIMIT 200",
-          [eventId, checkpointId, afterReceived],
+            " AND ($2::timestamptz IS NULL OR v.received_at>$2) ORDER BY v.received_at,v.id LIMIT 200",
+          [eventId, afterReceived],
         )
       ).rows;
       return rows.map((r) => ({
@@ -122,7 +125,6 @@ async function fetchRange(
   pool: pg.Pool,
   organizationId: string,
   eventId: string,
-  checkpointId: string,
   from: Date,
   to: Date,
 ): Promise<PassingRow[]> {
@@ -132,8 +134,8 @@ async function fetchRange(
       const rows = (
         await c.query<PassingRow>(
           passingQuery +
-            " AND v.effective_captured_at>=$3 AND v.effective_captured_at<=$4 ORDER BY v.effective_captured_at,v.id LIMIT 5000",
-          [eventId, checkpointId, from, to],
+            " AND v.effective_captured_at>=$2 AND v.effective_captured_at<=$3 ORDER BY v.effective_captured_at,v.id LIMIT 5000",
+          [eventId, from, to],
         )
       ).rows;
       return rows.map((r) => ({
@@ -166,7 +168,7 @@ export function startWiclaxBridge(options: WiclaxBridgeOptions) {
   const heartbeatMs = options.heartbeatMs ?? 15000;
   const clients = new Set<ClientState>();
   let timezone = "UTC";
-  let label = options.checkpointId;
+  let label = options.eventId;
   let cursor: Date | null = null;
   let stopping = false;
 
@@ -201,7 +203,6 @@ export function startWiclaxBridge(options: WiclaxBridgeOptions) {
           options.pool,
           options.organizationId,
           options.eventId,
-          options.checkpointId,
           cmd.from,
           cmd.to,
         );
@@ -241,13 +242,7 @@ export function startWiclaxBridge(options: WiclaxBridgeOptions) {
   const poll = async () => {
     if (stopping) return;
     try {
-      const rows = await fetchNew(
-        options.pool,
-        options.organizationId,
-        options.eventId,
-        options.checkpointId,
-        cursor,
-      );
+      const rows = await fetchNew(options.pool, options.organizationId, options.eventId, cursor);
       for (const row of rows) {
         broadcastLive(formatWiclaxPassing(toPassing(row, false), timezone), row.id);
         cursor = row.received_at;
@@ -261,15 +256,9 @@ export function startWiclaxBridge(options: WiclaxBridgeOptions) {
   let beatTimer: NodeJS.Timeout | undefined;
 
   const ready = (async () => {
-    const ctx = await loadCheckpointContext(
-      options.pool,
-      options.organizationId,
-      options.checkpointId,
-    );
-    if (ctx.event_id !== options.eventId)
-      throw new Error("Checkpoint não pertence ao evento informado.");
+    const ctx = await loadEventWiclaxContext(options.pool, options.organizationId, options.eventId);
     timezone = ctx.timezone || "UTC";
-    label = `${ctx.event_name} · ${ctx.checkpoint_name}`;
+    label = ctx.event_name;
     await new Promise<void>((resolve, reject) => {
       server.once("error", reject);
       server.listen(port, host, () => resolve());
@@ -281,7 +270,7 @@ export function startWiclaxBridge(options: WiclaxBridgeOptions) {
     }, heartbeatMs);
     if (!options.quiet) {
       console.log(
-        `Bridge Wiclax ouvindo em ${host}:${port} · ${label} (${options.checkpointId}) · fuso ${timezone}`,
+        `Bridge Wiclax ouvindo em ${host}:${port} · evento "${label}" (${options.eventId}) · fuso ${timezone}`,
       );
     }
   })();
@@ -291,7 +280,6 @@ export function startWiclaxBridge(options: WiclaxBridgeOptions) {
     host,
     port,
     eventId: options.eventId,
-    checkpointId: options.checkpointId,
     stats: () => ({
       clients: clients.size,
       reading: [...clients].filter((c) => c.reading).length,
