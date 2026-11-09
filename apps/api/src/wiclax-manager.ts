@@ -23,7 +23,37 @@ type Managed = {
 const byCheckpoint = new Map<string, Managed>();
 const byPort = new Map<number, string>();
 
-export function lanAddresses(): string[] {
+function isDockerBridgeIp(ip: string) {
+  const m = /^172\.(\d+)\./.exec(ip);
+  if (!m) return false;
+  const second = Number(m[1]);
+  return second >= 16 && second <= 31;
+}
+
+function advertiseIp(env: NodeJS.ProcessEnv = process.env) {
+  const raw = (env.WICLAX_ADVERTISE_IP ?? "").trim();
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(raw) ? raw : "";
+}
+
+function addressRank(ip: string, preferred: string, production: boolean) {
+  if (preferred && ip === preferred) return 0;
+  if (production) {
+    if (isDockerBridgeIp(ip)) return 1;
+    if (ip.startsWith("10.")) return 2;
+    if (ip.startsWith("192.168.")) return 3;
+    return 4;
+  }
+  if (ip.startsWith("192.168.")) return 1;
+  if (ip.startsWith("10.")) return 2;
+  if (isDockerBridgeIp(ip)) return 4;
+  if (ip.startsWith("172.")) return 3;
+  return 5;
+}
+
+/** IPs anunciáveis ao Wiclax. Em produção prioriza bridge Docker; WICLAX_ADVERTISE_IP fixa o destaque. */
+export function lanAddresses(env: NodeJS.ProcessEnv = process.env): string[] {
+  const preferred = advertiseIp(env);
+  const production = (env.NODE_ENV ?? "").toLowerCase() === "production";
   const out: string[] = [];
   for (const entries of Object.values(os.networkInterfaces())) {
     for (const entry of entries ?? []) {
@@ -32,7 +62,11 @@ export function lanAddresses(): string[] {
       out.push(entry.address);
     }
   }
-  return [...new Set(out)].sort();
+  if (preferred && !out.includes(preferred)) out.push(preferred);
+  return [...new Set(out)].sort((a, b) => {
+    const rank = addressRank(a, preferred, production) - addressRank(b, preferred, production);
+    return rank !== 0 ? rank : a.localeCompare(b);
+  });
 }
 
 function statusOf(checkpointId: string): WiclaxStatus {

@@ -3,12 +3,21 @@ import test from "node:test";
 import { getWiclaxStatus, lanAddresses } from "../../apps/api/src/wiclax-manager.js";
 
 test("lanAddresses retorna apenas IPv4 públicos da máquina ou lista vazia", () => {
-  const list = lanAddresses();
+  const list = lanAddresses({ NODE_ENV: "development" });
   assert.ok(Array.isArray(list));
   for (const ip of list) {
     assert.match(ip, /^\d{1,3}(\.\d{1,3}){3}$/);
     assert.notEqual(ip, "127.0.0.1");
   }
+});
+
+test("WICLAX_ADVERTISE_IP fica em destaque mesmo com outros endereços", () => {
+  const preferred = "172.18.0.6";
+  const list = lanAddresses({
+    NODE_ENV: "production",
+    WICLAX_ADVERTISE_IP: preferred,
+  });
+  assert.equal(list[0], preferred);
 });
 
 test("status inicial de checkpoint sem bridge ativo", () => {

@@ -121,6 +121,7 @@ CLI: `WICLAX_CHECKPOINT_ID` + `npm run wiclax:bridge`.
 | Gatilho de envio | Após `STARTREAD`; fila interna desde a conexão/cursor |
 | Segurança | Só LAN/VPN; sem auth no socket nesta etapa |
 | Escopo | Um bridge TCP por checkpoint (`WICLAX_CHECKPOINT_ID` / painel) |
+| IP em destaque | `WICLAX_ADVERTISE_IP` (ex.: `172.18.0.6`). Sem isso, em `NODE_ENV=production` prioriza IPs Docker `172.16–31`; em local prioriza LAN `192.168`/`10` |
 
 ## Riscos
 
