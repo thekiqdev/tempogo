@@ -135,3 +135,7 @@ Consultar [regras e arquitetura do super admin](39-super-admin-regras-e-arquitet
 - [Painel administrativo guiado](50-painel-admin-guiado.md): plano e entrega local de cadastro em etapas, ativação automática, superadmin sem convite e diálogos mobile.
 
 - [Plano de layout do painel administrativo](51-plano-layout-painel-admin.md): navegação lateral, aproveitamento da tela, direção visual e implantação em cinco etapas.
+
+## Integração Wiclax
+
+- [Plano e MVP de envio de passagens](56-wiclax-integracao.md): bridge TCP (Generic/My system), etapas WX-01 a WX-03 e uso com `npm run wiclax:bridge`.

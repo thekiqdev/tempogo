@@ -1486,6 +1486,149 @@ p {
   padding: 20px 0;
   margin-top: 10px;
 }
+.integrations-accordion {
+  margin-top: 24px;
+  border: 1px solid #dfe6e8;
+  border-radius: 16px;
+  background: #fff;
+  overflow: hidden;
+}
+.integrations-accordion > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 16px 20px;
+  font-size: 16px;
+  font-weight: 700;
+}
+.integrations-accordion > summary::-webkit-details-marker {
+  display: none;
+}
+.integrations-accordion > summary::after {
+  content: "›";
+  float: right;
+  transform: rotate(90deg);
+  color: #6a7a83;
+}
+.integrations-accordion[open] > summary::after {
+  transform: rotate(-90deg);
+}
+.integrations-accordion > summary + * {
+  padding: 16px 20px 20px;
+  border-top: 1px solid #e4eaee;
+  background: #f7fafb;
+}
+.wiclax-card {
+  display: grid;
+  gap: 16px;
+}
+.wiclax-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+.wiclax-card-head h4 {
+  margin: 0 0 4px;
+  font-size: 18px;
+  line-height: 1.2;
+}
+.wiclax-card-head p {
+  margin: 0;
+  max-width: 42ch;
+  color: #4d5b63;
+  font-size: 14px;
+  line-height: 1.45;
+}
+.wiclax-state {
+  flex: none;
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #e8eef1;
+  color: #4d5b63;
+  font-size: 13px;
+  font-weight: 700;
+}
+.wiclax-state.is-on {
+  background: #edf5f1;
+  color: #186b55;
+}
+.wiclax-setup {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid #dfe6e8;
+  border-radius: 12px;
+  background: #fff;
+}
+.wiclax-port-field {
+  display: grid;
+  gap: 6px;
+  max-width: 10rem;
+  font-size: 13px;
+  font-weight: 600;
+}
+.wiclax-port-field input {
+  min-height: 42px;
+  width: 100%;
+}
+.wiclax-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 4px;
+}
+.wiclax-live {
+  display: grid;
+  gap: 14px;
+}
+.wiclax-situation {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #edf5f1;
+  color: #186b55;
+  font-size: 14px;
+  font-weight: 600;
+}
+.wiclax-credentials {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+.wiclax-copy {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid #dfe6e8;
+  border-radius: 12px;
+  background: #fff;
+}
+.wiclax-copy-label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #6a7a83;
+}
+.wiclax-copy-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+}
+.wiclax-copy-value {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 16px;
+  font-weight: 700;
+  color: #14212b;
+  word-break: break-all;
+}
+.wiclax-copy-row .secondary {
+  flex: none;
+  min-height: 36px;
+  padding: 0 12px;
+}
 .admin-more > button {
   background: white;
   border-bottom: 1px solid #e4eaee;

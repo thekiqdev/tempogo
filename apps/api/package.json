@@ -10,7 +10,8 @@
     "start": "node dist/server.js",
     "migrate": "node --env-file-if-exists=.env dist/migrate-cli.js",
     "setup": "node --env-file-if-exists=.env dist/setup-cli.js",
-    "superadmin:create": "node --env-file-if-exists=.env dist/bootstrap-password-cli.js"
+    "superadmin:create": "node --env-file-if-exists=.env dist/bootstrap-password-cli.js",
+    "wiclax:bridge": "node --env-file-if-exists=.env dist/wiclax-bridge-cli.js"
   },
   "dependencies": {
     "@tempogo/contracts": "0.1.0",

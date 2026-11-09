@@ -2,6 +2,7 @@ import type { Checkpoint } from "@tempogo/contracts";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import { HeaderActions } from "./page-header";
+import { IntegrationsAccordion } from "./wiclax-panel";
 
 type Access = {
   id: string;
@@ -637,6 +638,7 @@ export function AccessPanel({
             </li>
           ))}
       </ul>
+      {point && <IntegrationsAccordion checkpointId={point} />}
     </section>
   );
 }

@@ -49,6 +49,7 @@
     "migrate": "node --env-file-if-exists=.env apps/api/dist/migrate-cli.js",
     "setup": "cd apps/api && npm run setup",
     "superadmin:create": "node --env-file-if-exists=.env apps/api/dist/bootstrap-password-cli.js",
+    "wiclax:bridge": "node --env-file-if-exists=.env --import tsx apps/api/src/wiclax-bridge-cli.ts",
     "test:e2e:organizations": "node --env-file=.env --import tsx tests/e2e/organization-admin.mjs"
   },
   "devDependencies": {

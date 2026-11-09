@@ -4,6 +4,7 @@ import { kilometersToMeters, timezoneLabels } from "./admin-format";
 import { api } from "./api";
 import { type ChipMapping } from "./chip-file";
 import { ChipFilePicker } from "./chip-import";
+import { IntegrationsAccordion } from "./wiclax-panel";
 
 const distanceInput = /^\d*(?:[.,]\d{0,3})?$/;
 
@@ -530,168 +531,171 @@ export function CheckpointForm({
     if (value === "start") setDistance("0");
   }
   return (
-    <form className="guided-form checkpoint-editor" onSubmit={submit}>
-      <div className="guided-body">
-        <p className="eyebrow">PONTO DO PERCURSO</p>
-        <h2 ref={heading} tabIndex={-1}>
-          {checkpoint ? "Editar checkpoint" : "Novo checkpoint"}
-        </h2>
-        <p className="muted">
-          Um checkpoint é um ponto onde sua equipe registra a passagem dos corredores.
-        </p>
-        <fieldset className="kind-options">
-          <legend>Qual é a função deste ponto?</legend>
-          {[
-            ["start", "Largada", "Onde a prova começa"],
-            ["intermediate", "Intermediário", "Uma passagem durante a prova"],
-            ["finish", "Chegada", "Onde os corredores terminam"],
-          ].map(([value, label, help]) => (
-            <label key={value} className={kind === value ? "selected" : ""}>
-              <input
-                type="radio"
-                name="kind"
-                value={value}
-                checked={kind === value}
-                onChange={() => choose(value ?? "intermediate")}
-              />
-              <span>
-                <strong>{label}</strong>
-                <small>{help}</small>
-              </span>
-            </label>
-          ))}
-        </fieldset>
-        <label>
-          Nome do checkpoint
-          <input
-            name="name"
-            required
-            minLength={2}
-            maxLength={120}
-            value={name}
-            onChange={(e) => {
-              setName(e.target.value);
-              setDirty(true);
-            }}
-            placeholder="Ex.: Praça central · km 2,5"
-          />
-        </label>
-        <label>
-          Distância acumulada (km)
-          <input
-            name="distance"
-            inputMode="decimal"
-            pattern="[0-9]+([.,][0-9]{1,3})?"
-            autoComplete="off"
-            value={distance}
-            onChange={(e) => {
-              if (!distanceInput.test(e.target.value)) return;
-              setDistance(e.target.value);
-              setDirty(true);
-            }}
-            placeholder="Ex.: 2,5"
-            aria-describedby="checkpoint-distance-help"
-          />
-        </label>
-        <div className="distance-presets" aria-label="Distâncias frequentes do checkpoint">
-          {["0", "2,5", "5", "10", "21,1", "42,195"].map((km) => (
-            <button
-              type="button"
-              key={km}
-              aria-pressed={distance.replace(".", ",") === km}
-              onClick={() => {
-                setDistance(km);
-                setDirty(true);
-                setError("");
-              }}
-            >
-              {km} km
-            </button>
-          ))}
-        </div>
-        <p className="field-help" id="checkpoint-distance-help">
-          Distância desde a largada até este ponto. Use vírgula ou ponto para decimais (até 3
-          casas). Na largada, use 0. Pode deixar em branco.
-        </p>
-        <label>
-          Ordem no percurso
-          <input
-            name="sequence"
-            type="text"
-            inputMode="numeric"
-            pattern="([1-9][0-9]{0,3}|10000)"
-            title="Informe um número inteiro entre 1 e 10000."
-            maxLength={5}
-            required
-            value={sequence}
-            onChange={(e) => {
-              if (!/^[0-9]*$/.test(e.target.value)) return;
-              setSequence(e.target.value);
-              setDirty(true);
-            }}
-          />
-        </label>
-        <p className="field-help">
-          Posição {sequence || "—"} na sequência dos pontos. Cada posição deve ser única.
-        </p>
-        {!!points.length && (
-          <details className="route-reference">
-            <summary>Ver a ordem dos pontos cadastrados</summary>
-            <ol>
-              {points.map((p) => (
-                <li key={p.id}>
-                  {p.sequence}. {p.name}
-                  {checkpoint?.id === p.id ? " (este ponto)" : ""}
-                </li>
-              ))}
-            </ol>
-          </details>
-        )}
-        <label className="checkbox">
-          <input
-            name="active"
-            type="checkbox"
-            checked={active}
-            onChange={(e) => {
-              setActive(e.target.checked);
-              setDirty(true);
-            }}
-          />
-          Checkpoint ativo
-        </label>
-        <p className="field-help">
-          Pontos inativos ficam fora da operação. Os acessos são configurados depois de salvar.
-        </p>
-        {error && (
-          <p role="alert" className="error">
-            {error}
+    <>
+      <form className="guided-form checkpoint-editor" onSubmit={submit}>
+        <div className="guided-body">
+          <p className="eyebrow">PONTO DO PERCURSO</p>
+          <h2 ref={heading} tabIndex={-1}>
+            {checkpoint ? "Editar checkpoint" : "Novo checkpoint"}
+          </h2>
+          <p className="muted">
+            Um checkpoint é um ponto onde sua equipe registra a passagem dos corredores.
           </p>
-        )}
-        {discard && (
-          <div className="discard-confirm" role="alert">
-            <p>Descartar as alterações deste ponto?</p>
-            <button type="button" className="secondary" onClick={() => setDiscard(false)}>
-              Continuar preenchendo
-            </button>
-            <button type="button" className="text-button" onClick={onCancel}>
-              Descartar e sair
-            </button>
+          <fieldset className="kind-options">
+            <legend>Qual é a função deste ponto?</legend>
+            {[
+              ["start", "Largada", "Onde a prova começa"],
+              ["intermediate", "Intermediário", "Uma passagem durante a prova"],
+              ["finish", "Chegada", "Onde os corredores terminam"],
+            ].map(([value, label, help]) => (
+              <label key={value} className={kind === value ? "selected" : ""}>
+                <input
+                  type="radio"
+                  name="kind"
+                  value={value}
+                  checked={kind === value}
+                  onChange={() => choose(value ?? "intermediate")}
+                />
+                <span>
+                  <strong>{label}</strong>
+                  <small>{help}</small>
+                </span>
+              </label>
+            ))}
+          </fieldset>
+          <label>
+            Nome do checkpoint
+            <input
+              name="name"
+              required
+              minLength={2}
+              maxLength={120}
+              value={name}
+              onChange={(e) => {
+                setName(e.target.value);
+                setDirty(true);
+              }}
+              placeholder="Ex.: Praça central · km 2,5"
+            />
+          </label>
+          <label>
+            Distância acumulada (km)
+            <input
+              name="distance"
+              inputMode="decimal"
+              pattern="[0-9]+([.,][0-9]{1,3})?"
+              autoComplete="off"
+              value={distance}
+              onChange={(e) => {
+                if (!distanceInput.test(e.target.value)) return;
+                setDistance(e.target.value);
+                setDirty(true);
+              }}
+              placeholder="Ex.: 2,5"
+              aria-describedby="checkpoint-distance-help"
+            />
+          </label>
+          <div className="distance-presets" aria-label="Distâncias frequentes do checkpoint">
+            {["0", "2,5", "5", "10", "21,1", "42,195"].map((km) => (
+              <button
+                type="button"
+                key={km}
+                aria-pressed={distance.replace(".", ",") === km}
+                onClick={() => {
+                  setDistance(km);
+                  setDirty(true);
+                  setError("");
+                }}
+              >
+                {km} km
+              </button>
+            ))}
           </div>
-        )}
-      </div>
-      <div className="guided-actions">
-        <button className="primary" disabled={busy}>
-          {busy ? "Salvando…" : saved.current ? "Atualizar percurso" : "Salvar checkpoint"}
-        </button>
-        <button
-          className="secondary"
-          type="button"
-          disabled={busy}
-          onClick={() => (dirty && !saved.current ? setDiscard(true) : onCancel())}
-        >
-          Cancelar
-        </button>
-      </div>
-    </form>
+          <p className="field-help" id="checkpoint-distance-help">
+            Distância desde a largada até este ponto. Use vírgula ou ponto para decimais (até 3
+            casas). Na largada, use 0. Pode deixar em branco.
+          </p>
+          <label>
+            Ordem no percurso
+            <input
+              name="sequence"
+              type="text"
+              inputMode="numeric"
+              pattern="([1-9][0-9]{0,3}|10000)"
+              title="Informe um número inteiro entre 1 e 10000."
+              maxLength={5}
+              required
+              value={sequence}
+              onChange={(e) => {
+                if (!/^[0-9]*$/.test(e.target.value)) return;
+                setSequence(e.target.value);
+                setDirty(true);
+              }}
+            />
+          </label>
+          <p className="field-help">
+            Posição {sequence || "—"} na sequência dos pontos. Cada posição deve ser única.
+          </p>
+          {!!points.length && (
+            <details className="route-reference">
+              <summary>Ver a ordem dos pontos cadastrados</summary>
+              <ol>
+                {points.map((p) => (
+                  <li key={p.id}>
+                    {p.sequence}. {p.name}
+                    {checkpoint?.id === p.id ? " (este ponto)" : ""}
+                  </li>
+                ))}
+              </ol>
+            </details>
+          )}
+          <label className="checkbox">
+            <input
+              name="active"
+              type="checkbox"
+              checked={active}
+              onChange={(e) => {
+                setActive(e.target.checked);
+                setDirty(true);
+              }}
+            />
+            Checkpoint ativo
+          </label>
+          <p className="field-help">
+            Pontos inativos ficam fora da operação. Os acessos são configurados depois de salvar.
+          </p>
+          {error && (
+            <p role="alert" className="error">
+              {error}
+            </p>
+          )}
+          {discard && (
+            <div className="discard-confirm" role="alert">
+              <p>Descartar as alterações deste ponto?</p>
+              <button type="button" className="secondary" onClick={() => setDiscard(false)}>
+                Continuar preenchendo
+              </button>
+              <button type="button" className="text-button" onClick={onCancel}>
+                Descartar e sair
+              </button>
+            </div>
+          )}
+        </div>
+        <div className="guided-actions">
+          <button className="primary" disabled={busy}>
+            {busy ? "Salvando…" : saved.current ? "Atualizar percurso" : "Salvar checkpoint"}
+          </button>
+          <button
+            className="secondary"
+            type="button"
+            disabled={busy}
+            onClick={() => (dirty && !saved.current ? setDiscard(true) : onCancel())}
+          >
+            Cancelar
+          </button>
+        </div>
+      </form>
+      {checkpoint && <IntegrationsAccordion checkpointId={checkpoint.id} />}
+    </>
   );
 }
