@@ -37,9 +37,22 @@ export function PlatformLogo() {
     </>
   );
 }
-type Settings = { logo_data_url: string | null; mfa_required: boolean; version: number };
+type PoolItem = {
+  port: number;
+  state: string;
+  checkpoint_id: string | null;
+  checkpoint_name: string | null;
+};
+type Settings = {
+  logo_data_url: string | null;
+  mfa_required: boolean;
+  version: number;
+  wiclax_ports_text: string;
+  wiclax_pool?: { ports: number[]; items: PoolItem[] };
+};
 export function PlatformSettings({ csrf }: { csrf: string }) {
   const [data, setData] = useState<Settings | null>(null),
+    [portsText, setPortsText] = useState("3097-3116"),
     [error, setError] = useState(""),
     [notice, setNotice] = useState(""),
     [busy, setBusy] = useState(false);
@@ -49,6 +62,7 @@ export function PlatformSettings({ csrf }: { csrf: string }) {
         const d = await r.json();
         if (!r.ok) throw Error(d.error?.message);
         setData(d);
+        setPortsText(d.wiclax_ports_text ?? "3097-3116");
       })
       .catch((e) => setError(e.message));
   }, []);
@@ -62,11 +76,23 @@ export function PlatformSettings({ csrf }: { csrf: string }) {
       const r = await fetch("/api/v1/platform/settings", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf },
-        body: JSON.stringify(data),
+        body: JSON.stringify({
+          logo_data_url: data.logo_data_url,
+          mfa_required: data.mfa_required,
+          wiclax_ports: portsText,
+          version: data.version,
+        }),
       });
       const d = await r.json();
       if (!r.ok) throw Error(d.error?.message ?? "Não foi possível salvar.");
-      setData({ logo_data_url: d.logo_data_url, mfa_required: d.mfa_required, version: d.version });
+      setData({
+        logo_data_url: d.logo_data_url,
+        mfa_required: d.mfa_required,
+        version: d.version,
+        wiclax_ports_text: d.wiclax_ports_text,
+        wiclax_pool: d.wiclax_pool,
+      });
+      setPortsText(d.wiclax_ports_text ?? portsText);
       setNotice("Configurações salvas.");
       window.dispatchEvent(new Event("platform:saved"));
       window.dispatchEvent(new Event("platform:settings"));
@@ -162,6 +188,33 @@ export function PlatformSettings({ csrf }: { csrf: string }) {
                 ? "Ao entrar, cada superadmin deverá configurar ou informar o código do Authenticator. Sessões iniciadas somente com senha precisarão entrar novamente."
                 : "Os superadmins entram com email e senha, sem exigir o Authenticator. A confirmação de identidade usa apenas a senha."}
             </p>
+          </section>
+          <section className="platform-settings-card">
+            <h2>Portas Wiclax</h2>
+            <p>
+              Cadastre aqui as portas TCP já publicadas no Easypanel (ex.: 3097-3116). O organizador
+              conecta um checkpoint e o sistema escolhe a próxima porta livre automaticamente.
+            </p>
+            <label>
+              Pool de portas
+              <input
+                value={portsText}
+                disabled={busy}
+                placeholder="3097-3116"
+                onChange={(e) => setPortsText(e.target.value)}
+              />
+            </label>
+            <p>
+              Use faixa (`3097-3116`) ou lista (`3097, 3098, 3100`). Publique as mesmas portas no
+              serviço da API no Easypanel antes de usar em produção.
+            </p>
+            {data.wiclax_pool && (
+              <p role="status">
+                {data.wiclax_pool.items.filter((i) => i.state === "free").length} livres ·{" "}
+                {data.wiclax_pool.items.filter((i) => i.state !== "free").length}{" "}
+                ocupadas/bloqueadas de {data.wiclax_pool.ports.length}
+              </p>
+            )}
           </section>
           <div>
             <button className="primary" disabled={busy}>

@@ -638,9 +638,7 @@ export function AccessPanel({
             </li>
           ))}
       </ul>
-      {point && (
-        <IntegrationsAccordion eventId={eventId} highlightCheckpointId={point} defaultOpen />
-      )}
+      {point && <IntegrationsAccordion checkpointId={point} defaultOpen />}
     </section>
   );
 }

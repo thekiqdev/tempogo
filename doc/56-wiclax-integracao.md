@@ -1,6 +1,6 @@
 # TempoGo — integração com Wiclax (aquisição de passagens)
 
-Data: 06/11/2026 (atualizado 09/11/2026). Status: **P1 produção** entregue — 1 porta por evento + Source por checkpoint; WX-02/P3 homologação pendente.
+Data: 06/11/2026 (atualizado 10/11/2026). Status: **Sprint 1 multi-porta** — 1 porta por checkpoint com pool no Super Admin; Source mantido; homologação pendente.
 
 ## Objetivo
 
@@ -94,43 +94,45 @@ Tarefas:
 
 Substituído pelo modelo P1 abaixo (1 porta + Source).
 
-### P1 — Produção: 1 porta por evento + Source
+### Sprint 1 — Pool de portas + 1 porta por checkpoint
 
-**Entrega:** um bridge TCP por **evento**; todas as passagens dos checkpoints usam Source = nome do ponto. UI em Configuração → **Integrações**.
+**Entrega:** bridge TCP por **checkpoint**; porta escolhida automaticamente no pool do Super Admin; Source continua na linha.
 
 Tarefas:
 
-- [x] API `GET/POST .../events/:id/wiclax`.
-- [x] Bridge filtra por `event_id`; Source = nome do checkpoint.
-- [x] Sanfona Integrações no evento com lista de Sources.
-- [x] `WICLAX_ADVERTISE_IP` para destacar o IP público da VPS.
-- [ ] P2: publicar TCP na VPS + checklist firewall.
-- [ ] P3: homologação com Wiclax e celular 4G.
+- [x] API `GET/POST .../checkpoints/:id/wiclax`.
+- [x] Bridge filtra por `checkpoint_id`; Source = nome do checkpoint.
+- [x] Pool em Super Admin → Configurações → Portas Wiclax (padrão `3097-3116`).
+- [x] Seleção automática da próxima porta livre; libera ao desconectar.
+- [x] UI Integrações na tela de Acessos do checkpoint.
+- [ ] Publicar as portas do pool no Easypanel (manual).
+- [ ] Sprint 2: persistir ocupação após restart + homologação.
 
-**Aceite:** uma aquisição no Wiclax; destinos mapeados por Source; N checkpoints sem N portas.
+**Aceite:** conectar 2+ checkpoints; cada um recebe porta distinta; Wiclax com uma aquisição My system por porta.
 
-**Uso:** Evento → Configuração → Integrações → Conectar → copiar IP/porta → no Wiclax Ligar + Começar a leitura → mapear Source.
+**Uso:** Checkpoint → Acessos → Integrações → Conectar → copiar IP/porta → no Wiclax Ligar + Começar a leitura.
 
-**Produção (P2):**
+**Checklist Easypanel (manual):**
 
-```env
-WICLAX_ADVERTISE_IP=13.140.182.124
-# Publicar a porta TCP do bridge (ex. 3097) no Docker/Easypanel + firewall
-```
+1. No serviço da **API**, criar portas TCP `3097`…`3116` (Publicado = Alvo).
+2. Definir `WICLAX_ADVERTISE_IP=13.140.182.124` (IP público da VPS).
+3. No Super Admin → Configurações, confirmar pool `3097-3116` e salvar.
+4. Redeploy da API após a migration `019_wiclax_port_pool`.
 
-CLI: `WICLAX_EVENT_ID` + `npm run wiclax:bridge`.
+CLI: `WICLAX_CHECKPOINT_ID` + `npm run wiclax:bridge`.
 
 ## Decisões
 
 | Tema | Decisão atual |
 | --- | --- |
 | Papel de rede | TempoGo = servidor TCP; Wiclax = cliente |
-| Escopo | Um bridge por evento; Source diferencia checkpoint |
-| Porta | Uma por evento (padrão 3097) |
+| Escopo | Um bridge por checkpoint |
+| Porta | Automática a partir do pool do Super Admin |
+| Source | Mantido (nome do checkpoint) |
 | Identificador | Chip se cadastrado; senão peito |
-| Origem (Source) | Nome do checkpoint |
 | Gatilho de envio | Após `STARTREAD` |
 | IP em destaque | `WICLAX_ADVERTISE_IP` (IP da VPS em produção) |
+| Abrir portas no Easypanel | Manual (app só faz `listen`) |
 
 ## Riscos
 

@@ -14,7 +14,6 @@ import { ObservationPanel, ReconciliationPanel } from "./management-panel";
 import { HeaderActions, HeaderActionsContext, HeaderContent, HeaderContext } from "./page-header";
 import { PlatformApp } from "./platform";
 import { RecoveryPanel } from "./recovery-admin";
-import { IntegrationsAccordion } from "./wiclax-panel";
 import "./style.css";
 
 type EventView = {
@@ -921,7 +920,6 @@ function Detail({
           locked={["finalized", "archived"].includes(race.state)}
         />
       )}
-      {tab === "settings" && <IntegrationsAccordion eventId={race.id} />}
       {tab === "settings" && (
         <ReconciliationPanel eventId={race.id} version={race.version} state={race.state} />
       )}

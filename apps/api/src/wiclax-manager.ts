@@ -1,7 +1,8 @@
 import os from "node:os";
 import type pg from "pg";
-import { HttpError } from "./db.js";
-import { loadEventWiclaxContext, startWiclaxBridge } from "./wiclax-bridge.js";
+import { HttpError, transaction } from "./db.js";
+import { loadCheckpointWiclaxContext, startWiclaxBridge } from "./wiclax-bridge.js";
+import { DEFAULT_WICLAX_PORTS } from "./wiclax-ports.js";
 
 export type WiclaxSource = {
   id: string;
@@ -13,20 +14,26 @@ export type WiclaxSource = {
 export type WiclaxStatus = {
   active: boolean;
   event_id: string;
+  checkpoint_id: string;
+  checkpoint_name: string;
   port: number | null;
   host: string | null;
   addresses: string[];
   clients: number;
   reading_clients: number;
-  sources: WiclaxSource[];
+  source: string;
+  pool_size: number;
+  pool_free: number;
 };
 
 type Managed = {
   organizationId: string;
+  eventId: string;
+  checkpointName: string;
   bridge: ReturnType<typeof startWiclaxBridge>;
 };
 
-const byEvent = new Map<string, Managed>();
+const byCheckpoint = new Map<string, Managed>();
 const byPort = new Map<number, string>();
 
 function isDockerBridgeIp(ip: string) {
@@ -75,114 +82,232 @@ export function lanAddresses(env: NodeJS.ProcessEnv = process.env): string[] {
   });
 }
 
-async function sourcesOf(
-  pool: pg.Pool | null,
-  organizationId: string | null,
-  eventId: string,
-): Promise<WiclaxSource[]> {
-  if (!pool || !organizationId) return [];
+export async function loadWiclaxPortPool(pool: pg.Pool): Promise<number[]> {
   try {
-    const ctx = await loadEventWiclaxContext(pool, organizationId, eventId);
-    return ctx.sources;
+    const row = (
+      await pool.query<{ wiclax_ports: number[] | null }>(
+        "SELECT wiclax_ports FROM app.platform_settings WHERE singleton",
+      )
+    ).rows[0];
+    const ports = (row?.wiclax_ports ?? []).filter(
+      (p) => Number.isInteger(p) && p >= 1024 && p <= 65535,
+    );
+    return ports.length ? [...new Set(ports)].sort((a, b) => a - b) : [...DEFAULT_WICLAX_PORTS];
   } catch {
-    return [];
+    return [...DEFAULT_WICLAX_PORTS];
   }
 }
 
+function pickFreePort(pool: number[]): number {
+  for (const port of pool) {
+    if (!byPort.has(port)) return port;
+  }
+  throw new HttpError(
+    409,
+    "PORT_POOL_EXHAUSTED",
+    "Todas as portas Wiclax do pool estão em uso. Desconecte um checkpoint ou amplie o pool no Super Admin.",
+  );
+}
+
 async function statusOf(
-  eventId: string,
+  checkpointId: string,
   pool: pg.Pool | null = null,
   organizationId: string | null = null,
 ): Promise<WiclaxStatus> {
-  const managed = byEvent.get(eventId);
-  const sources = await sourcesOf(pool, organizationId ?? managed?.organizationId ?? null, eventId);
+  const managed = byCheckpoint.get(checkpointId);
+  const portPool = pool ? await loadWiclaxPortPool(pool) : [...DEFAULT_WICLAX_PORTS];
+  const free = portPool.filter((p) => !byPort.has(p)).length;
+
   if (!managed) {
+    let eventId = "";
+    let checkpointName = "";
+    if (pool && organizationId) {
+      try {
+        const ctx = await loadCheckpointWiclaxContext(pool, organizationId, checkpointId);
+        eventId = ctx.event_id;
+        checkpointName = ctx.checkpoint_name;
+      } catch {
+        /* status sem contexto */
+      }
+    }
     return {
       active: false,
       event_id: eventId,
+      checkpoint_id: checkpointId,
+      checkpoint_name: checkpointName,
       port: null,
       host: null,
       addresses: lanAddresses(),
       clients: 0,
       reading_clients: 0,
-      sources,
+      source: checkpointName,
+      pool_size: portPool.length,
+      pool_free: free,
     };
   }
+
   const stats = managed.bridge.stats();
   return {
     active: true,
-    event_id: eventId,
+    event_id: managed.eventId,
+    checkpoint_id: checkpointId,
+    checkpoint_name: managed.checkpointName,
     port: managed.bridge.port,
     host: managed.bridge.host,
     addresses: lanAddresses(),
     clients: stats.clients,
     reading_clients: stats.reading,
-    sources,
+    source: managed.checkpointName,
+    pool_size: portPool.length,
+    pool_free: free,
   };
 }
 
-export async function getWiclaxStatus(eventId: string, pool?: pg.Pool, organizationId?: string) {
-  return statusOf(eventId, pool ?? null, organizationId ?? null);
+export async function getWiclaxStatus(
+  checkpointId: string,
+  pool?: pg.Pool,
+  organizationId?: string,
+) {
+  return statusOf(checkpointId, pool ?? null, organizationId ?? null);
 }
 
-export async function startWiclaxForEvent(
+export async function startWiclaxForCheckpoint(
   pool: pg.Pool,
   organizationId: string,
-  eventId: string,
-  port = 3097,
+  checkpointId: string,
 ) {
-  const existing = byEvent.get(eventId);
+  const existing = byCheckpoint.get(checkpointId);
   if (existing) {
     if (existing.organizationId !== organizationId)
       throw new HttpError(403, "FORBIDDEN", "Bridge pertence a outra organização.");
-    return statusOf(eventId, pool, organizationId);
+    return statusOf(checkpointId, pool, organizationId);
   }
-  const owner = byPort.get(port);
-  if (owner && owner !== eventId)
-    throw new HttpError(
-      409,
-      "PORT_IN_USE",
-      "A porta " +
-        port +
-        " já está em uso por outro evento. Escolha outra porta ou desconecte o outro bridge.",
-    );
-  await loadEventWiclaxContext(pool, organizationId, eventId);
-  const bridge = startWiclaxBridge({
-    pool,
-    organizationId,
-    eventId,
-    host: "0.0.0.0",
-    port,
-    quiet: true,
-  });
-  try {
-    await bridge.ready;
-  } catch (e) {
-    const code =
-      e && typeof e === "object" && "code" in e ? String((e as { code: string }).code) : "";
-    if (code === "EADDRINUSE")
-      throw new HttpError(
-        409,
-        "PORT_IN_USE",
-        "A porta " + port + " já está ocupada neste servidor. Escolha outra porta.",
-      );
-    if (e instanceof Error && e.message.startsWith("Evento não encontrado"))
-      throw new HttpError(404, "NOT_FOUND", "Evento não encontrado");
-    throw new HttpError(500, "WICLAX_START_FAILED", "Não foi possível abrir o bridge Wiclax.");
+
+  const ctx = await loadCheckpointWiclaxContext(pool, organizationId, checkpointId);
+  const portPool = await loadWiclaxPortPool(pool);
+
+  const tryStart = async (port: number) => {
+    const owner = byPort.get(port);
+    if (owner && owner !== checkpointId)
+      throw new HttpError(409, "PORT_IN_USE", "A porta " + port + " já está em uso.");
+    const bridge = startWiclaxBridge({
+      pool,
+      organizationId,
+      eventId: ctx.event_id,
+      checkpointId,
+      host: "0.0.0.0",
+      port,
+      quiet: true,
+    });
+    try {
+      await bridge.ready;
+    } catch (e) {
+      const code =
+        e && typeof e === "object" && "code" in e ? String((e as { code: string }).code) : "";
+      if (code === "EADDRINUSE") {
+        byPort.set(port, "external:" + port);
+        throw Object.assign(new Error("EADDRINUSE"), { code: "EADDRINUSE", port });
+      }
+      if (e instanceof Error && e.message.startsWith("Checkpoint não encontrado"))
+        throw new HttpError(404, "NOT_FOUND", "Checkpoint não encontrado");
+      throw new HttpError(500, "WICLAX_START_FAILED", "Não foi possível abrir o bridge Wiclax.");
+    }
+    byCheckpoint.set(checkpointId, {
+      organizationId,
+      eventId: ctx.event_id,
+      checkpointName: ctx.checkpoint_name,
+      bridge,
+    });
+    byPort.set(port, checkpointId);
+    return statusOf(checkpointId, pool, organizationId);
+  };
+
+  let lastBusy: number | null = null;
+  for (let attempt = 0; attempt < portPool.length; attempt++) {
+    let port: number;
+    try {
+      port = pickFreePort(portPool);
+    } catch (e) {
+      if (e instanceof HttpError) throw e;
+      throw e;
+    }
+    try {
+      return await tryStart(port);
+    } catch (e) {
+      if (
+        e &&
+        typeof e === "object" &&
+        "code" in e &&
+        (e as { code: string }).code === "EADDRINUSE"
+      ) {
+        lastBusy = port;
+        continue;
+      }
+      throw e;
+    }
   }
-  byEvent.set(eventId, { organizationId, bridge });
-  byPort.set(port, eventId);
-  return statusOf(eventId, pool, organizationId);
+
+  throw new HttpError(
+    409,
+    "PORT_POOL_EXHAUSTED",
+    lastBusy
+      ? "Nenhuma porta do pool pôde ser aberta neste servidor. Confira as portas publicadas no Easypanel."
+      : "Todas as portas Wiclax do pool estão em uso.",
+  );
 }
 
-export async function stopWiclaxForEvent(organizationId: string, eventId: string, pool?: pg.Pool) {
-  const managed = byEvent.get(eventId);
-  if (!managed) return statusOf(eventId, pool ?? null, organizationId);
+export async function stopWiclaxForCheckpoint(
+  organizationId: string,
+  checkpointId: string,
+  pool?: pg.Pool,
+) {
+  const managed = byCheckpoint.get(checkpointId);
+  if (!managed) return statusOf(checkpointId, pool ?? null, organizationId);
   if (managed.organizationId !== organizationId)
     throw new HttpError(403, "FORBIDDEN", "Bridge pertence a outra organização.");
   const port = managed.bridge.port;
   await managed.bridge.close();
-  byEvent.delete(eventId);
-  if (byPort.get(port) === eventId) byPort.delete(port);
-  return statusOf(eventId, pool ?? null, organizationId);
+  byCheckpoint.delete(checkpointId);
+  if (byPort.get(port) === checkpointId) byPort.delete(port);
+  return statusOf(checkpointId, pool ?? null, organizationId);
+}
+
+/** Snapshot do pool para o Super Admin (ocupação em memória neste processo). */
+export async function wiclaxPoolSnapshot(pool: pg.Pool) {
+  const ports = await loadWiclaxPortPool(pool);
+  return {
+    ports,
+    items: ports.map((port) => {
+      const owner = byPort.get(port);
+      const managed = owner && !owner.startsWith("external:") ? byCheckpoint.get(owner) : undefined;
+      return {
+        port,
+        state: owner ? (owner.startsWith("external:") ? "blocked" : "busy") : "free",
+        checkpoint_id: managed ? owner : null,
+        checkpoint_name: managed?.checkpointName ?? null,
+        event_id: managed?.eventId ?? null,
+      };
+    }),
+  };
+}
+
+export async function readCheckpointOrg(
+  pool: pg.Pool,
+  organizationId: string,
+  checkpointId: string,
+) {
+  return transaction(
+    pool,
+    async (c) => {
+      const row = (
+        await c.query<{ event_id: string }>(
+          "SELECT event_id FROM app.checkpoints WHERE organization_id=$1 AND id=$2",
+          [organizationId, checkpointId],
+        )
+      ).rows[0];
+      if (!row) throw new HttpError(404, "NOT_FOUND", "Checkpoint não encontrado");
+      return row;
+    },
+    organizationId,
+  );
 }

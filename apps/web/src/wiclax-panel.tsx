@@ -1,28 +1,19 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
 
-type WiclaxSource = {
-  id: string;
-  name: string;
-  kind: string;
-  sequence: number;
-};
-
 type WiclaxStatus = {
   active: boolean;
   event_id: string;
+  checkpoint_id: string;
+  checkpoint_name: string;
   port: number | null;
   host: string | null;
   addresses: string[];
   clients: number;
   reading_clients: number;
-  sources: WiclaxSource[];
-};
-
-const kindLabel: Record<string, string> = {
-  start: "Largada",
-  intermediate: "Intermediário",
-  finish: "Chegada",
+  source: string;
+  pool_size: number;
+  pool_free: number;
 };
 
 function CopyValue({ label, value }: { label: string; value: string }) {
@@ -55,18 +46,12 @@ function CopyValue({ label, value }: { label: string; value: string }) {
 }
 
 function situationLabel(status: WiclaxStatus) {
-  if (status.reading_clients > 0) return "Recebendo passagens";
+  if (status.reading_clients > 0) return "Recebendo passagens deste checkpoint";
   if (status.clients > 0) return "Wiclax conectado — inicie a leitura";
-  return "Aguardando o Wiclax conectar";
+  return "Aguardando o Wiclax conectar nesta porta";
 }
 
-export function WiclaxPanel({
-  eventId,
-  highlightCheckpointId,
-}: {
-  eventId: string;
-  highlightCheckpointId?: string;
-}) {
+export function WiclaxPanel({ checkpointId }: { checkpointId: string }) {
   const [status, setStatus] = useState<WiclaxStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -74,7 +59,7 @@ export function WiclaxPanel({
   useEffect(() => {
     let active = true;
     const load = () =>
-      api<WiclaxStatus>("/events/" + eventId + "/wiclax")
+      api<WiclaxStatus>("/checkpoints/" + checkpointId + "/wiclax")
         .then((s) => {
           if (!active) return;
           setStatus(s);
@@ -89,16 +74,14 @@ export function WiclaxPanel({
       active = false;
       clearInterval(timer);
     };
-  }, [eventId]);
+  }, [checkpointId]);
 
   const connect = async () => {
     setBusy(true);
     setError("");
     try {
       setStatus(
-        await api<WiclaxStatus>("/events/" + eventId + "/wiclax/connect", "POST", {
-          port: 3097,
-        }),
+        await api<WiclaxStatus>("/checkpoints/" + checkpointId + "/wiclax/connect", "POST", {}),
       );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha ao conectar");
@@ -111,7 +94,9 @@ export function WiclaxPanel({
     setBusy(true);
     setError("");
     try {
-      setStatus(await api<WiclaxStatus>("/events/" + eventId + "/wiclax/disconnect", "POST", {}));
+      setStatus(
+        await api<WiclaxStatus>("/checkpoints/" + checkpointId + "/wiclax/disconnect", "POST", {}),
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha ao desconectar");
     } finally {
@@ -122,10 +107,7 @@ export function WiclaxPanel({
   const addresses = status?.addresses ?? [];
   const primary = addresses[0];
   const active = !!status?.active;
-  const sources = status?.sources ?? [];
-  const current = highlightCheckpointId
-    ? sources.find((s) => s.id === highlightCheckpointId)
-    : undefined;
+  const source = status?.source || status?.checkpoint_name || "";
 
   return (
     <article className={"wiclax-card" + (active ? " is-active" : "")}>
@@ -133,8 +115,8 @@ export function WiclaxPanel({
         <div>
           <h4>Wiclax</h4>
           <p>
-            Uma porta para o evento. No Wiclax, cada destino usa o Source igual ao nome do
-            checkpoint.
+            Cada checkpoint usa uma porta do pool. A porta é escolhida automaticamente. O Source
+            continua sendo enviado na passagem.
           </p>
         </div>
         <p className={"wiclax-state" + (active ? " is-on" : "")} role="status">
@@ -148,11 +130,11 @@ export function WiclaxPanel({
         </p>
       )}
 
-      {current && (
+      {source && (
         <div className="wiclax-current-source">
-          <CopyValue label="Source deste checkpoint" value={current.name} />
+          <CopyValue label="Source deste checkpoint" value={source} />
           <p className="field-help">
-            Cadastre no Wiclax um destino com este Source. As passagens deste ponto vão para ele.
+            Opcional no Wiclax: use este Source no destino. A separação principal é pela porta.
           </p>
         </div>
       )}
@@ -160,8 +142,8 @@ export function WiclaxPanel({
       {!active ? (
         <div className="wiclax-setup">
           <p className="field-help">
-            Ao conectar, o TempoGo abre a ponte do evento (porta 3097). IP e porta aparecem só
-            depois.
+            Pool: {status?.pool_free ?? "—"} livres de {status?.pool_size ?? "—"}. Ao conectar, o
+            sistema reserva a próxima porta disponível.
           </p>
           <div className="wiclax-actions">
             <button
@@ -187,6 +169,9 @@ export function WiclaxPanel({
             <p className="field-help">Outros IPs desta máquina: {addresses.slice(1).join(", ")}</p>
           )}
           {!primary && <p className="field-help">Não foi possível detectar o IP desta máquina.</p>}
+          <p className="field-help">
+            No Wiclax, crie uma aquisição My system com este IP e esta porta para este checkpoint.
+          </p>
           <div className="wiclax-actions">
             <button
               type="button"
@@ -199,42 +184,21 @@ export function WiclaxPanel({
           </div>
         </div>
       )}
-
-      <div className="wiclax-sources">
-        <h5>Sources no Wiclax</h5>
-        {sources.length === 0 ? (
-          <p className="field-help">Cadastre checkpoints ativos para listar os Sources.</p>
-        ) : (
-          <ul>
-            {sources.map((s) => (
-              <li key={s.id} className={s.id === highlightCheckpointId ? "is-current" : undefined}>
-                <code>{s.name}</code>
-                <span>
-                  {kindLabel[s.kind] ?? s.kind} · ordem {s.sequence}
-                  {s.id === highlightCheckpointId ? " · este ponto" : ""}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
     </article>
   );
 }
 
 export function IntegrationsAccordion({
-  eventId,
-  highlightCheckpointId,
+  checkpointId,
   defaultOpen = false,
 }: {
-  eventId: string;
-  highlightCheckpointId?: string;
+  checkpointId: string;
   defaultOpen?: boolean;
 }) {
   return (
     <details className="integrations-accordion" open={defaultOpen || undefined}>
       <summary>Integrações</summary>
-      <WiclaxPanel eventId={eventId} highlightCheckpointId={highlightCheckpointId} />
+      <WiclaxPanel checkpointId={checkpointId} />
     </details>
   );
 }
