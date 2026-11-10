@@ -1525,19 +1525,36 @@ p {
   display: flex;
   justify-content: space-between;
   gap: 16px;
-  align-items: flex-start;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.wiclax-card-title {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 220px;
+}
+.wiclax-card-name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 .wiclax-card-head h4 {
-  margin: 0 0 4px;
+  margin: 0;
   font-size: 18px;
   line-height: 1.2;
 }
-.wiclax-card-head p {
+.wiclax-card-title > p {
   margin: 0;
   max-width: 42ch;
   color: #4d5b63;
   font-size: 14px;
   line-height: 1.45;
+}
+.wiclax-card-head .wiclax-actions {
+  margin-top: 0;
+  flex: none;
 }
 .wiclax-state {
   flex: none;

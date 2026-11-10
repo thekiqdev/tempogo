@@ -49,7 +49,7 @@ function CopyValue({ label, value }: { label: string; value: string }) {
 function situationLabel(status: WiclaxStatus) {
   if (status.reading_clients > 0) return "Recebendo passagens deste checkpoint";
   if (status.clients > 0) return "Wiclax conectado — inicie a leitura";
-  return "Aguardando o Wiclax conectar nesta porta";
+  return "Aguardando o Wiclax conectar";
 }
 
 export function WiclaxPanel({ checkpointId }: { checkpointId: string }) {
@@ -108,50 +108,21 @@ export function WiclaxPanel({ checkpointId }: { checkpointId: string }) {
   const addresses = status?.addresses ?? [];
   const primary = addresses[0];
   const active = !!status?.active;
-  const source = status?.source || status?.checkpoint_name || "";
 
   return (
     <article className={"wiclax-card" + (active ? " is-active" : "")}>
       <header className="wiclax-card-head">
-        <div>
-          <h4>Wiclax</h4>
-          <p>
-            Cada checkpoint usa uma porta do pool. A porta é escolhida automaticamente. O Source
-            continua sendo enviado na passagem.
-          </p>
-        </div>
-        <p className={"wiclax-state" + (active ? " is-on" : "")} role="status">
-          {active ? "Conectado" : "Desligado"}
-        </p>
-      </header>
-
-      {error && (
-        <p role="alert" className="error">
-          {error}
-        </p>
-      )}
-
-      {source && (
-        <div className="wiclax-current-source">
-          <CopyValue label="Source deste checkpoint" value={source} />
-          <p className="field-help">
-            Opcional no Wiclax: use este Source no destino. A separação principal é pela porta.
-          </p>
-        </div>
-      )}
-
-      {!active ? (
-        <div className="wiclax-setup">
-          <p className="field-help">
-            Pool: {status?.pool_free ?? "—"} livres de {status?.pool_size ?? "—"}. Ao conectar, o
-            sistema reserva a próxima porta disponível.
-          </p>
-          {status?.pool_exhausted && (
-            <p role="alert" className="error">
-              Não há portas livres no pool. Peça ao Super Admin para ampliar ou limpar bloqueios.
+        <div className="wiclax-card-title">
+          <div className="wiclax-card-name">
+            <h4>Wiclax</h4>
+            <p className={"wiclax-state" + (active ? " is-on" : "")} role="status">
+              {active ? "Ligado" : "Desligado"}
             </p>
-          )}
-          <div className="wiclax-actions">
+          </div>
+          <p>Receba as passagens deste checkpoint no Wiclax.</p>
+        </div>
+        <div className="wiclax-actions">
+          {!active ? (
             <button
               type="button"
               className="primary"
@@ -160,25 +131,7 @@ export function WiclaxPanel({ checkpointId }: { checkpointId: string }) {
             >
               {busy ? "Abrindo…" : "Conectar"}
             </button>
-          </div>
-        </div>
-      ) : (
-        <div className="wiclax-live">
-          <p className="wiclax-situation" role="status">
-            {situationLabel(status!)}
-          </p>
-          <div className="wiclax-credentials">
-            <CopyValue label="IP" value={primary ?? "—"} />
-            <CopyValue label="Porta" value={String(status!.port)} />
-          </div>
-          {addresses.length > 1 && (
-            <p className="field-help">Outros IPs desta máquina: {addresses.slice(1).join(", ")}</p>
-          )}
-          {!primary && <p className="field-help">Não foi possível detectar o IP desta máquina.</p>}
-          <p className="field-help">
-            No Wiclax, crie uma aquisição My system com este IP e esta porta para este checkpoint.
-          </p>
-          <div className="wiclax-actions">
+          ) : (
             <button
               type="button"
               className="secondary"
@@ -187,7 +140,34 @@ export function WiclaxPanel({ checkpointId }: { checkpointId: string }) {
             >
               {busy ? "Encerrando…" : "Desconectar"}
             </button>
+          )}
+        </div>
+      </header>
+
+      {error && (
+        <p role="alert" className="error">
+          {error}
+        </p>
+      )}
+
+      {status?.pool_exhausted && !active && (
+        <p role="alert" className="error">
+          Não há conexão disponível no momento. Fale com o administrador.
+        </p>
+      )}
+
+      {active && (
+        <div className="wiclax-live">
+          <p className="wiclax-situation" role="status">
+            {situationLabel(status!)}
+          </p>
+          <div className="wiclax-credentials">
+            <CopyValue label="IP" value={primary ?? "—"} />
+            <CopyValue label="Porta" value={String(status!.port)} />
           </div>
+          {!primary && (
+            <p className="field-help">Não foi possível detectar o IP desta máquina.</p>
+          )}
         </div>
       )}
     </article>
