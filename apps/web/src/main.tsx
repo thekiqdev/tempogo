@@ -2,6 +2,7 @@ import type { Checkpoint as CP, RaceEvent as Race, AdminSession as User } from "
 import { type FormEvent, StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { timezoneLabels } from "./admin-format";
+import { type AdminPath, buildAdminPath, parseAdminPath, syncAdminPath } from "./admin-path";
 import { api, setCsrf } from "./api";
 import { AuditPanel } from "./audit-panel";
 import { AccessPanel } from "./capture-admin";
@@ -15,6 +16,25 @@ import { PlatformApp } from "./platform";
 import { RecoveryPanel } from "./recovery-admin";
 import { IntegrationsAccordion } from "./wiclax-panel";
 import "./style.css";
+
+type EventView = {
+  tab: string;
+  editEvent: boolean;
+  checkpointId: string | "new" | null;
+  checkpointAction: "edit" | "access" | null;
+};
+
+function viewFromPath(path: AdminPath): EventView {
+  if (path.kind !== "event") {
+    return { tab: "summary", editEvent: false, checkpointId: null, checkpointAction: null };
+  }
+  return {
+    tab: path.tab,
+    editEvent: path.editEvent,
+    checkpointId: path.checkpointId,
+    checkpointAction: path.checkpointAction,
+  };
+}
 
 const states: Record<string, string> = {
   draft: "Rascunho",
@@ -243,22 +263,39 @@ function Auth({ onLogin }: { onLogin: (u: User) => void }) {
 }
 function Detail({
   race,
+  view,
+  onViewChange,
   onReload,
   onBack,
 }: {
   race: Race;
+  view: EventView;
+  onViewChange: (next: EventView) => void;
   onReload: () => Promise<void>;
   onBack: () => void;
 }) {
   const [points, setPoints] = useState<CP[]>([]),
-    [tab, setTab] = useState("summary"),
     [pointsLoading, setPointsLoading] = useState(true),
     [pointsError, setPointsError] = useState(""),
-    [edit, setEdit] = useState(false),
-    [cpEdit, setCpEdit] = useState<CP | "new" | null>(null),
-    [cpAccess, setCpAccess] = useState<CP | null>(null),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
+  const tab = view.tab;
+  const edit = view.editEvent;
+  const editingCheckpoint =
+    view.checkpointAction === "edit" && view.checkpointId
+      ? view.checkpointId === "new"
+        ? ("new" as const)
+        : points.find((p) => p.id === view.checkpointId)
+      : null;
+  const cpAccess =
+    view.checkpointAction === "access" && view.checkpointId && view.checkpointId !== "new"
+      ? (points.find((p) => p.id === view.checkpointId) ?? null)
+      : null;
+  const waitingCheckpoint =
+    !!view.checkpointId &&
+    view.checkpointId !== "new" &&
+    pointsLoading &&
+    (view.checkpointAction === "edit" || view.checkpointAction === "access");
   const choices: Record<string, string[]> = {
     draft: ["ready"],
     ready: ["running", "draft"],
@@ -332,7 +369,14 @@ function Detail({
         expected_version: race.version,
       });
       await onReload();
-      if (action !== "pause") setTab("summary");
+      if (action !== "pause") {
+        onViewChange({
+          tab: "summary",
+          editEvent: false,
+          checkpointId: null,
+          checkpointAction: null,
+        });
+      }
       window.scrollTo(0, 0);
     } catch (e) {
       setError((e as Error).message);
@@ -341,8 +385,21 @@ function Detail({
     }
   }
   function navigate(value: string) {
-    setTab(value === "access" ? "checkpoints" : value);
-    setCpAccess(value === "access" ? (points[0] ?? null) : null);
+    if (value === "access") {
+      onViewChange({
+        tab: "checkpoints",
+        editEvent: false,
+        checkpointId: points[0]?.id ?? null,
+        checkpointAction: points[0] ? "access" : null,
+      });
+    } else {
+      onViewChange({
+        tab: value,
+        editEvent: false,
+        checkpointId: null,
+        checkpointAction: null,
+      });
+    }
     setError("");
     window.scrollTo(0, 0);
   }
@@ -359,8 +416,8 @@ function Detail({
         </button>
         <div className="header-title-block">
           <h1>
-            {cpEdit
-              ? cpEdit === "new"
+            {editingCheckpoint
+              ? editingCheckpoint === "new"
                 ? "Novo checkpoint"
                 : "Editar checkpoint"
               : edit
@@ -368,7 +425,7 @@ function Detail({
                 : race.name}
           </h1>
           <p className="header-metadata">
-            {(cpEdit || edit) && <span>{race.name}</span>}
+            {(editingCheckpoint || edit) && <span>{race.name}</span>}
             <span>
               {race.category_name}
               {race.distance_m ? " · " + race.distance_m / 1000 + " km" : ""}
@@ -410,23 +467,41 @@ function Detail({
         </button>
       </section>
     );
-  if (cpEdit)
+  if (waitingCheckpoint)
+    return (
+      <section className="panel">
+        {header}
+        <p role="status">Carregando checkpoint…</p>
+      </section>
+    );
+  if (editingCheckpoint)
     return (
       <div className="focused-editor">
         {header}
         <CheckpointForm
-          key={typeof cpEdit === "string" ? "new" : cpEdit.id}
-          checkpoint={typeof cpEdit === "string" ? undefined : cpEdit}
+          key={editingCheckpoint === "new" ? "new" : editingCheckpoint.id}
+          checkpoint={editingCheckpoint === "new" ? undefined : editingCheckpoint}
           eventId={race.id}
           points={points}
           next={Math.max(0, ...points.map((p) => p.sequence)) + 1}
           onSaved={async () => {
             await onReload();
             await load();
-            setCpEdit(null);
-            setTab("checkpoints");
+            onViewChange({
+              tab: "checkpoints",
+              editEvent: false,
+              checkpointId: null,
+              checkpointAction: null,
+            });
           }}
-          onCancel={() => setCpEdit(null)}
+          onCancel={() =>
+            onViewChange({
+              tab: "checkpoints",
+              editEvent: false,
+              checkpointId: null,
+              checkpointAction: null,
+            })
+          }
         />{" "}
       </div>
     );
@@ -438,9 +513,21 @@ function Detail({
           race={race}
           onSave={async () => {
             await onReload();
-            setEdit(false);
+            onViewChange({
+              tab: "settings",
+              editEvent: false,
+              checkpointId: null,
+              checkpointAction: null,
+            });
           }}
-          onCancel={() => setEdit(false)}
+          onCancel={() =>
+            onViewChange({
+              tab: "settings",
+              editEvent: false,
+              checkpointId: null,
+              checkpointAction: null,
+            })
+          }
         />
       </div>
     );
@@ -475,10 +562,14 @@ function Detail({
           points={points}
           loading={pointsLoading}
           onNavigate={navigate}
-          onAdd={() => {
-            setTab("checkpoints");
-            setCpEdit("new");
-          }}
+          onAdd={() =>
+            onViewChange({
+              tab: "checkpoints",
+              editEvent: false,
+              checkpointId: "new",
+              checkpointAction: "edit",
+            })
+          }
         />
       )}
       {tab === "more" && (
@@ -542,7 +633,14 @@ function Detail({
                 ["finalized", "archived"].includes(race.state) ||
                 (race.state === "closed" && !race.paused_for_edit)
               }
-              onBack={() => setCpAccess(null)}
+              onBack={() =>
+                onViewChange({
+                  tab: "checkpoints",
+                  editEvent: false,
+                  checkpointId: null,
+                  checkpointAction: null,
+                })
+              }
             />
           ) : (
             <>
@@ -552,7 +650,17 @@ function Detail({
                 </h3>
                 {(race.state === "draft" || race.paused_for_edit) && (
                   <HeaderActions>
-                    <button className="primary" onClick={() => setCpEdit("new")}>
+                    <button
+                      className="primary"
+                      onClick={() =>
+                        onViewChange({
+                          tab: "checkpoints",
+                          editEvent: false,
+                          checkpointId: "new",
+                          checkpointAction: "edit",
+                        })
+                      }
+                    >
                       + Adicionar checkpoint
                     </button>
                   </HeaderActions>
@@ -600,15 +708,30 @@ function Detail({
                       </span>
                       <div className="checkpoint-actions">
                         {(race.state === "draft" || race.paused_for_edit) && (
-                          <button className="secondary" onClick={() => setCpEdit(p)}>
+                          <button
+                            className="secondary"
+                            onClick={() =>
+                              onViewChange({
+                                tab: "checkpoints",
+                                editEvent: false,
+                                checkpointId: p.id,
+                                checkpointAction: "edit",
+                              })
+                            }
+                          >
                             Editar
                           </button>
                         )}
                         <button
                           className="secondary"
-                          onClick={() => {
-                            setCpAccess(p);
-                          }}
+                          onClick={() =>
+                            onViewChange({
+                              tab: "checkpoints",
+                              editEvent: false,
+                              checkpointId: p.id,
+                              checkpointAction: "access",
+                            })
+                          }
                         >
                           Acessos
                         </button>
@@ -625,183 +748,171 @@ function Detail({
       {tab === "recovery" && <RecoveryPanel eventId={race.id} />}
       {tab === "settings" && (
         <>
-          {edit ? (
-            <EventForm
-              race={race}
-              onSave={async () => {
-                setEdit(false);
-                await onReload();
-              }}
-              onCancel={() => setEdit(false)}
-            />
-          ) : (
-            <section className="panel">
-              <div className="section-title">
-                <h3>Dados e operação</h3>
-                {(race.state === "draft" || race.paused_for_edit) && (
-                  <HeaderActions>
-                    <button className="secondary" onClick={() => setEdit(true)}>
-                      Editar dados
-                    </button>
-                  </HeaderActions>
-                )}
-              </div>
-              <dl className="review-summary">
-                <div>
-                  <dt>Voltas</dt>
-                  <dd>
-                    {race.laps ?? 1}
-                    {(race.laps ?? 1) > 1
-                      ? ` · intervalo mínimo de ${((race.min_lap_seconds ?? 60) / 60).toLocaleString("pt-BR", { maximumFractionDigits: 4 })} minutos`
-                      : ""}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Data</dt>
-                  <dd>{race.local_date.split("-").reverse().join("/")}</dd>
-                </div>
-                <div>
-                  <dt>Local</dt>
-                  <dd>{race.location || "Não informado"}</dd>
-                </div>
-                <div>
-                  <dt>Fuso horário</dt>
-                  <dd>{timezoneLabels[race.timezone] ?? race.timezone}</dd>
-                </div>
-                <div>
-                  <dt>Modalidade</dt>
-                  <dd>
-                    {race.category_name} ·{" "}
-                    {race.distance_m == null
-                      ? "Distância não informada"
-                      : race.distance_m / 1000 + " km"}
-                  </dd>
-                </div>
-              </dl>
-              <p className="muted">
-                Os dados e o percurso podem ser editados em rascunho ou durante uma pausa para
-                edição.
-              </p>
-              {race.gun_start_at && (
-                <p>
-                  Largada:{" "}
-                  {new Intl.DateTimeFormat("pt-BR", {
-                    dateStyle: "short",
-                    timeStyle: "medium",
-                    timeZone: race.timezone,
-                  }).format(new Date(race.gun_start_at))}
-                </p>
-              )}
-              {["draft", "ready"].includes(race.state) && (
-                <div className="next-hint">
-                  <p>Para começar, confira as tarefas e use o botão Iniciar evento no Resumo.</p>
-                  <button className="primary" onClick={() => navigate("summary")}>
-                    Ir para o início do evento
-                  </button>
-                </div>
-              )}
-              {race.state === "running" && (
-                <div className="event-pause-control">
-                  <h3>Precisa editar a prova?</h3>
-                  <p>
-                    Pause a coleta para alterar os dados ou o percurso. A largada original será
-                    preservada. Aparelhos offline podem ter registros pendentes, que serão
-                    sinalizados para revisão ao sincronizar.
-                  </p>
+          <section className="panel">
+            <div className="section-title">
+              <h3>Dados e operação</h3>
+              {(race.state === "draft" || race.paused_for_edit) && (
+                <HeaderActions>
                   <button
                     className="secondary"
-                    disabled={busy}
-                    onClick={() => void operate("pause")}
+                    onClick={() =>
+                      onViewChange({
+                        tab: "settings",
+                        editEvent: true,
+                        checkpointId: null,
+                        checkpointAction: null,
+                      })
+                    }
                   >
-                    Pausar para editar
+                    Editar dados
                   </button>
-                </div>
+                </HeaderActions>
               )}
-              {race.paused_for_edit && (
-                <div className="event-pause-control">
-                  <h3>Evento pausado para edição</h3>
-                  <p>
-                    Edite os dados ou o percurso e retome quando estiver pronto. O tempo da prova
-                    continua contando desde a largada original.
+            </div>
+            <dl className="review-summary">
+              <div>
+                <dt>Voltas</dt>
+                <dd>
+                  {race.laps ?? 1}
+                  {(race.laps ?? 1) > 1
+                    ? ` · intervalo mínimo de ${((race.min_lap_seconds ?? 60) / 60).toLocaleString("pt-BR", { maximumFractionDigits: 4 })} minutos`
+                    : ""}
+                </dd>
+              </div>
+              <div>
+                <dt>Data</dt>
+                <dd>{race.local_date.split("-").reverse().join("/")}</dd>
+              </div>
+              <div>
+                <dt>Local</dt>
+                <dd>{race.location || "Não informado"}</dd>
+              </div>
+              <div>
+                <dt>Fuso horário</dt>
+                <dd>{timezoneLabels[race.timezone] ?? race.timezone}</dd>
+              </div>
+              <div>
+                <dt>Modalidade</dt>
+                <dd>
+                  {race.category_name} ·{" "}
+                  {race.distance_m == null
+                    ? "Distância não informada"
+                    : race.distance_m / 1000 + " km"}
+                </dd>
+              </div>
+            </dl>
+            <p className="muted">
+              Os dados e o percurso podem ser editados em rascunho ou durante uma pausa para edição.
+            </p>
+            {race.gun_start_at && (
+              <p>
+                Largada:{" "}
+                {new Intl.DateTimeFormat("pt-BR", {
+                  dateStyle: "short",
+                  timeStyle: "medium",
+                  timeZone: race.timezone,
+                }).format(new Date(race.gun_start_at))}
+              </p>
+            )}
+            {["draft", "ready"].includes(race.state) && (
+              <div className="next-hint">
+                <p>Para começar, confira as tarefas e use o botão Iniciar evento no Resumo.</p>
+                <button className="primary" onClick={() => navigate("summary")}>
+                  Ir para o início do evento
+                </button>
+              </div>
+            )}
+            {race.state === "running" && (
+              <div className="event-pause-control">
+                <h3>Precisa editar a prova?</h3>
+                <p>
+                  Pause a coleta para alterar os dados ou o percurso. A largada original será
+                  preservada. Aparelhos offline podem ter registros pendentes, que serão sinalizados
+                  para revisão ao sincronizar.
+                </p>
+                <button className="secondary" disabled={busy} onClick={() => void operate("pause")}>
+                  Pausar para editar
+                </button>
+              </div>
+            )}
+            {race.paused_for_edit && (
+              <div className="event-pause-control">
+                <h3>Evento pausado para edição</h3>
+                <p>
+                  Edite os dados ou o percurso e retome quando estiver pronto. O tempo da prova
+                  continua contando desde a largada original.
+                </p>
+                <button className="secondary" onClick={() => navigate("checkpoints")}>
+                  Editar percurso
+                </button>
+                <button className="primary" disabled={busy} onClick={() => void operate("resume")}>
+                  Retomar evento
+                </button>
+              </div>
+            )}
+            {!race.paused_for_edit &&
+              !["draft", "ready"].includes(race.state) &&
+              (choices[race.state]?.length ?? 0) > 0 && (
+                <form key={race.state} className="transition" onSubmit={change}>
+                  <h3>Próxima ação da prova</h3>
+                  <p className="field-help">
+                    Preparar libera a conferência da operação. Iniciar habilita a coleta; encerrar
+                    interrompe novos registros. Finalize após revisar e conciliar.
                   </p>
-                  <button className="secondary" onClick={() => navigate("checkpoints")}>
-                    Editar percurso
-                  </button>
-                  <button
-                    className="primary"
-                    disabled={busy}
-                    onClick={() => void operate("resume")}
-                  >
-                    Retomar evento
-                  </button>
-                </div>
-              )}
-              {!race.paused_for_edit &&
-                !["draft", "ready"].includes(race.state) &&
-                (choices[race.state]?.length ?? 0) > 0 && (
-                  <form key={race.state} className="transition" onSubmit={change}>
-                    <h3>Próxima ação da prova</h3>
-                    <p className="field-help">
-                      Preparar libera a conferência da operação. Iniciar habilita a coleta; encerrar
-                      interrompe novos registros. Finalize após revisar e conciliar.
-                    </p>
+                  <label>
+                    Próximo estado
+                    <select aria-label="Próximo estado" name="target_state">
+                      {choices[race.state]?.map((s) => (
+                        <option key={s} value={s}>
+                          {states[s]}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {race.state === "ready" && (
                     <label>
-                      Próximo estado
-                      <select aria-label="Próximo estado" name="target_state">
-                        {choices[race.state]?.map((s) => (
-                          <option key={s} value={s}>
-                            {states[s]}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    {race.state === "ready" && (
-                      <label>
-                        Horário real da largada (fuso deste aparelho)
-                        <input
-                          type="datetime-local"
-                          name="gun_start_at"
-                          step="1"
-                          defaultValue={new Date(
-                            Date.now() - new Date().getTimezoneOffset() * 60000,
-                          )
-                            .toISOString()
-                            .slice(0, 19)}
-                        />
-                      </label>
-                    )}
-                    <label>
-                      Motivo
-                      <textarea
-                        name="reason"
-                        required
-                        minLength={3}
-                        maxLength={500}
-                        placeholder="Descreva a alteração para o histórico"
+                      Horário real da largada (fuso deste aparelho)
+                      <input
+                        type="datetime-local"
+                        name="gun_start_at"
+                        step="1"
+                        defaultValue={new Date(Date.now() - new Date().getTimezoneOffset() * 60000)
+                          .toISOString()
+                          .slice(0, 19)}
                       />
                     </label>
-                    {race.state === "closed" && (
-                      <label>
-                        Exceção de conciliação (opcional; mínimo 10 caracteres)
-                        <textarea
-                          name="exception_reason"
-                          minLength={10}
-                          maxLength={500}
-                          placeholder="Justifique aparelhos não conciliados apenas ao finalizar"
-                        />
-                      </label>
-                    )}
-                    <button className="primary" disabled={busy}>
-                      {busy ? "Atualizando…" : "Confirmar alteração"}
-                    </button>
-                  </form>
-                )}
-              <p className="footnote">
-                Finalizar exige resolver revisões e conciliar aparelhos ou justificar uma exceção.
-                Reabrir retorna à coleta fechada para nova conferência.
-              </p>
-            </section>
-          )}
+                  )}
+                  <label>
+                    Motivo
+                    <textarea
+                      name="reason"
+                      required
+                      minLength={3}
+                      maxLength={500}
+                      placeholder="Descreva a alteração para o histórico"
+                    />
+                  </label>
+                  {race.state === "closed" && (
+                    <label>
+                      Exceção de conciliação (opcional; mínimo 10 caracteres)
+                      <textarea
+                        name="exception_reason"
+                        minLength={10}
+                        maxLength={500}
+                        placeholder="Justifique aparelhos não conciliados apenas ao finalizar"
+                      />
+                    </label>
+                  )}
+                  <button className="primary" disabled={busy}>
+                    {busy ? "Atualizando…" : "Confirmar alteração"}
+                  </button>
+                </form>
+              )}
+            <p className="footnote">
+              Finalizar exige resolver revisões e conciliar aparelhos ou justificar uma exceção.
+              Reabrir retorna à coleta fechada para nova conferência.
+            </p>
+          </section>
         </>
       )}
       {tab === "settings" && (
@@ -819,34 +930,117 @@ function Detail({
   );
 }
 function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
+  const [path, setPath] = useState(() =>
+    location.pathname === "/" ? "/eventos" : location.pathname,
+  );
+  const route = parseAdminPath(path);
   const [events, setEvents] = useState<Race[]>([]),
     [selected, setSelected] = useState<Race | null>(null),
-    [create, setCreate] = useState(false),
     [error, setError] = useState(""),
     [loading, setLoading] = useState(true),
     [offset, setOffset] = useState(0);
   const [headerTarget, setHeaderTarget] = useState<HTMLElement | null>(null);
   const [actionsTarget, setActionsTarget] = useState<HTMLDivElement | null>(null);
+  const create = route.kind === "create";
+  const eventView = viewFromPath(route);
+
   async function refresh() {
     const r = await api<{ items: Race[] }>("/events?limit=20&offset=" + offset);
     setEvents(r.items);
   }
+
+  function go(nextPath: string, mode: "push" | "replace" = "push") {
+    syncAdminPath(nextPath, mode);
+    setPath(nextPath);
+  }
+
+  function openList(mode: "push" | "replace" = "push") {
+    setSelected(null);
+    go(buildAdminPath({ kind: "list" }), mode);
+    refresh().catch((e) => setError(e.message));
+  }
+
+  function openCreate() {
+    setSelected(null);
+    go(buildAdminPath({ kind: "create" }));
+  }
+
+  async function open(id: string, propagate = false, view?: EventView) {
+    setError("");
+    try {
+      const race = await api<Race>("/events/" + id);
+      setSelected(race);
+      const nextView = view ?? eventView;
+      const next = buildAdminPath({
+        kind: "event",
+        eventId: race.id,
+        name: race.name,
+        tab: nextView.tab,
+        editEvent: nextView.editEvent,
+        checkpointId: nextView.checkpointId,
+        checkpointAction: nextView.checkpointAction,
+      });
+      go(
+        next,
+        location.pathname === next ? "replace" : route.kind === "event" ? "replace" : "push",
+      );
+      return race;
+    } catch (e) {
+      setError((e as Error).message);
+      if (propagate) throw e;
+    }
+  }
+
+  function changeEventView(next: EventView) {
+    if (!selected) return;
+    go(
+      buildAdminPath({
+        kind: "event",
+        eventId: selected.id,
+        name: selected.name,
+        tab: next.tab,
+        editEvent: next.editEvent,
+        checkpointId: next.checkpointId,
+        checkpointAction: next.checkpointAction,
+      }),
+    );
+  }
+
+  useEffect(() => {
+    if (location.pathname === "/") syncAdminPath("/eventos", "replace");
+    const onPop = () => setPath(location.pathname === "/" ? "/eventos" : location.pathname);
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
   useEffect(() => {
     setLoading(true);
     refresh()
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, [offset]);
-  async function open(id: string, propagate = false) {
-    setError("");
-    try {
-      setSelected(await api<Race>("/events/" + id));
-      setCreate(false);
-    } catch (e) {
-      setError((e as Error).message);
-      if (propagate) throw e;
+
+  useEffect(() => {
+    if (route.kind === "list" || route.kind === "create") {
+      setSelected(null);
+      return;
     }
-  }
+    if (selected?.id === route.eventId) {
+      const canonical = buildAdminPath({
+        kind: "event",
+        eventId: selected.id,
+        name: selected.name,
+        tab: route.tab,
+        editEvent: route.editEvent,
+        checkpointId: route.checkpointId,
+        checkpointAction: route.checkpointAction,
+      });
+      if (canonical !== path) go(canonical, "replace");
+      return;
+    }
+    void open(route.eventId, false, viewFromPath(route));
+  }, [route.kind, route.kind === "event" ? route.eventId : ""]);
+
   return (
     <div className={"workspace admin-workspace" + (selected ? " has-event" : "")}>
       <aside className="sidebar">
@@ -855,14 +1049,7 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
           <span>ORGANIZAÇÃO</span>
           <strong>{user.organization.name}</strong>
         </div>
-        <button
-          className="side-link"
-          onClick={() => {
-            setSelected(null);
-            setCreate(false);
-            refresh().catch((e) => setError(e.message));
-          }}
-        >
+        <button className="side-link" onClick={() => openList()}>
           ◉ Eventos
         </button>
         <details className="sidebar-bottom">
@@ -893,7 +1080,7 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
           </div>
           <div className="header-actions" ref={setActionsTarget}>
             {!create && !selected && (
-              <button className="primary" onClick={() => setCreate(true)}>
+              <button className="primary" onClick={openCreate}>
                 + Novo evento
               </button>
             )}
@@ -904,28 +1091,47 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
             <div className="page">
               <ErrorMessage text={error} />
               {create ? (
-                <>
-                  <EventForm
-                    onSave={async (id) => {
-                      await refresh();
-                      await open(id, true);
-                    }}
-                    onCancel={() => setCreate(false)}
-                  />
-                </>
+                <EventForm
+                  onSave={async (id) => {
+                    await refresh();
+                    await open(id, true, {
+                      tab: "summary",
+                      editEvent: false,
+                      checkpointId: null,
+                      checkpointAction: null,
+                    });
+                  }}
+                  onCancel={() => openList()}
+                />
               ) : selected ? (
                 <Detail
                   key={selected.id}
                   race={selected}
+                  view={eventView}
+                  onViewChange={changeEventView}
                   onReload={async () => {
-                    await open(selected.id, true);
+                    await open(selected.id, true, eventView);
                     await refresh();
                   }}
-                  onBack={() => {
-                    setSelected(null);
-                    refresh().catch((e) => setError(e.message));
-                  }}
+                  onBack={() => openList()}
                 />
+              ) : route.kind === "event" ? (
+                error ? (
+                  <section className="panel">
+                    <h2>Não foi possível abrir o evento</h2>
+                    <button className="secondary" onClick={() => openList()}>
+                      Voltar aos eventos
+                    </button>
+                    <button
+                      className="primary"
+                      onClick={() => void open(route.eventId, false, viewFromPath(route))}
+                    >
+                      Tentar novamente
+                    </button>
+                  </section>
+                ) : (
+                  <p role="status">Abrindo evento…</p>
+                )
               ) : (
                 <>
                   {loading ? (
@@ -935,14 +1141,25 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
                       <span className="empty-marker">01</span>
                       <h2>Sua próxima prova começa aqui</h2>
                       <p>Cadastre o evento e organize os checkpoints do percurso.</p>
-                      <button className="primary" onClick={() => setCreate(true)}>
+                      <button className="primary" onClick={openCreate}>
                         Criar primeiro evento
                       </button>
                     </section>
                   ) : (
                     <div className="events-list">
                       {events.map((e) => (
-                        <button className="event-row" key={e.id} onClick={() => open(e.id)}>
+                        <button
+                          className="event-row"
+                          key={e.id}
+                          onClick={() =>
+                            void open(e.id, false, {
+                              tab: "summary",
+                              editEvent: false,
+                              checkpointId: null,
+                              checkpointAction: null,
+                            })
+                          }
+                        >
                           <div className="date-tile">
                             <strong>{e.local_date.slice(8)}</strong>
                             <span>
