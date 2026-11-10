@@ -4,7 +4,7 @@ import { z } from "zod";
 import { transaction } from "./db.js";
 import type { PlatformOptions } from "./platform.js";
 import { failure, managementAudit, type PlatformGuard } from "./platform-management.js";
-import { wiclaxPoolSnapshot } from "./wiclax-manager.js";
+import { clearWiclaxBlockedPorts, wiclaxPoolSnapshot } from "./wiclax-manager.js";
 import { DEFAULT_WICLAX_PORTS, formatWiclaxPortPool, parseWiclaxPortPool } from "./wiclax-ports.js";
 
 export async function platformSettings(c: pg.PoolClient) {
@@ -77,10 +77,17 @@ export function registerPlatformSettings(
     transaction(o.pool, async (c) => {
       await guard(req, c);
       const settings = await platformSettings(c);
-      const pool = await wiclaxPoolSnapshot(o.pool);
+      const pool = await wiclaxPoolSnapshot(o.pool, { restore: false });
       return { ...settings, wiclax_pool: pool };
     }),
   );
+  app.post("/api/v1/platform/settings/wiclax-clear-blocked", async (req) => {
+    await transaction(o.pool, async (c) => {
+      await guard(req, c, true);
+    });
+    const pool = await clearWiclaxBlockedPorts(o.pool);
+    return { wiclax_pool: pool };
+  });
   app.post("/api/v1/platform/settings", { bodyLimit: 360000 }, async (req) => {
     const input = z
       .object({
@@ -121,7 +128,7 @@ export function registerPlatformSettings(
       const settings = await platformSettings(c);
       return {
         ...settings,
-        wiclax_pool: await wiclaxPoolSnapshot(o.pool),
+        wiclax_pool: await wiclaxPoolSnapshot(o.pool, { restore: false }),
         requires_login: input.mfa_required && s.mfa_authenticated === false,
       };
     });

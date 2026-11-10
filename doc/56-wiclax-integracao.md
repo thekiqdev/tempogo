@@ -1,6 +1,6 @@
 # TempoGo — integração com Wiclax (aquisição de passagens)
 
-Data: 06/11/2026 (atualizado 10/11/2026). Status: **Sprint 1 multi-porta** — 1 porta por checkpoint com pool no Super Admin; Source mantido; homologação pendente.
+Data: 06/11/2026 (atualizado 10/11/2026). Status: **Sprint 2** — leases persistidos + status do pool no Super Admin; homologação manual pendente.
 
 ## Objetivo
 
@@ -106,9 +106,10 @@ Tarefas:
 - [x] Seleção automática da próxima porta livre; libera ao desconectar.
 - [x] UI Integrações na tela de Acessos do checkpoint.
 - [ ] Publicar as portas do pool no Easypanel (manual).
-- [ ] Sprint 2: persistir ocupação após restart + homologação.
+- [x] Sprint 2: persistir leases (`wiclax_port_leases`), restaurar bridges no boot, status detalhado + limpar bloqueios.
+- [ ] Homologação com Wiclax e volume.
 
-**Aceite:** conectar 2+ checkpoints; cada um recebe porta distinta; Wiclax com uma aquisição My system por porta.
+**Aceite:** conectar 2+ checkpoints; cada um recebe porta distinta; Wiclax com uma aquisição My system por porta. Após restart da API, bridges ativos voltam sem reconectar manualmente.
 
 **Uso:** Checkpoint → Acessos → Integrações → Conectar → copiar IP/porta → no Wiclax Ligar + Começar a leitura.
 
@@ -117,7 +118,14 @@ Tarefas:
 1. No serviço da **API**, criar portas TCP `3097`…`3116` (Publicado = Alvo).
 2. Definir `WICLAX_ADVERTISE_IP=13.140.182.124` (IP público da VPS).
 3. No Super Admin → Configurações, confirmar pool `3097-3116` e salvar.
-4. Redeploy da API após a migration `019_wiclax_port_pool`.
+4. Redeploy da API após as migrations `019_wiclax_port_pool` e `020_wiclax_port_leases`.
+
+**Runbook rápido (Sprint 2):**
+
+- Conectar no checkpoint → anotar IP/porta → aquisição My system no Wiclax.
+- Reinício da API: leases em `app.wiclax_port_leases` restauram os bridges automaticamente.
+- Porta “Bloqueada” no Super Admin: costuma ser EADDRINUSE (não publicada ou ocupada). Corrigir no Easypanel e use **Limpar portas bloqueadas**.
+- Pool esgotado: desconecte CPs ociosos, limpe bloqueios ou amplie o pool + publique no Easypanel.
 
 CLI: `WICLAX_CHECKPOINT_ID` + `npm run wiclax:bridge`.
 

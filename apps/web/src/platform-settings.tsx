@@ -42,13 +42,24 @@ type PoolItem = {
   state: string;
   checkpoint_id: string | null;
   checkpoint_name: string | null;
+  event_id: string | null;
+  note: string | null;
+  live: boolean;
+};
+type WiclaxPool = {
+  ports: number[];
+  free: number;
+  busy: number;
+  blocked: number;
+  exhausted: boolean;
+  items: PoolItem[];
 };
 type Settings = {
   logo_data_url: string | null;
   mfa_required: boolean;
   version: number;
   wiclax_ports_text: string;
-  wiclax_pool?: { ports: number[]; items: PoolItem[] };
+  wiclax_pool?: WiclaxPool;
 };
 export function PlatformSettings({ csrf }: { csrf: string }) {
   const [data, setData] = useState<Settings | null>(null),
@@ -209,11 +220,79 @@ export function PlatformSettings({ csrf }: { csrf: string }) {
               serviço da API no Easypanel antes de usar em produção.
             </p>
             {data.wiclax_pool && (
-              <p role="status">
-                {data.wiclax_pool.items.filter((i) => i.state === "free").length} livres ·{" "}
-                {data.wiclax_pool.items.filter((i) => i.state !== "free").length}{" "}
-                ocupadas/bloqueadas de {data.wiclax_pool.ports.length}
-              </p>
+              <>
+                <p role="status">
+                  {data.wiclax_pool.free} livres · {data.wiclax_pool.busy} ocupadas ·{" "}
+                  {data.wiclax_pool.blocked} bloqueadas de {data.wiclax_pool.ports.length}
+                </p>
+                {data.wiclax_pool.exhausted && (
+                  <p role="alert" className="error">
+                    Pool esgotado. Desconecte checkpoints, limpe bloqueios ou amplie as portas
+                    publicadas.
+                  </p>
+                )}
+                <div className="wiclax-pool-table-wrap">
+                  <table className="wiclax-pool-table">
+                    <thead>
+                      <tr>
+                        <th>Porta</th>
+                        <th>Situação</th>
+                        <th>Checkpoint</th>
+                        <th>Detalhe</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.wiclax_pool.items.map((item) => (
+                        <tr key={item.port} className={"is-" + item.state}>
+                          <td>
+                            <code>{item.port}</code>
+                          </td>
+                          <td>
+                            {item.state === "free"
+                              ? "Livre"
+                              : item.state === "blocked"
+                                ? "Bloqueada"
+                                : item.live
+                                  ? "Em uso"
+                                  : "Reservada"}
+                          </td>
+                          <td>{item.checkpoint_name ?? "—"}</td>
+                          <td>{item.note ?? (item.live ? "Bridge ativo" : "—")}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {data.wiclax_pool.blocked > 0 && (
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={busy}
+                    onClick={() => {
+                      void (async () => {
+                        setBusy(true);
+                        setError("");
+                        try {
+                          const r = await fetch("/api/v1/platform/settings/wiclax-clear-blocked", {
+                            method: "POST",
+                            headers: { "X-CSRF-Token": csrf },
+                          });
+                          const d = await r.json();
+                          if (!r.ok) throw Error(d.error?.message ?? "Falha ao limpar bloqueios.");
+                          setData({ ...data, wiclax_pool: d.wiclax_pool });
+                          setNotice("Bloqueios de porta limpos.");
+                        } catch (e) {
+                          setError((e as Error).message);
+                        } finally {
+                          setBusy(false);
+                        }
+                      })();
+                    }}
+                  >
+                    Limpar portas bloqueadas
+                  </button>
+                )}
+              </>
             )}
           </section>
           <div>

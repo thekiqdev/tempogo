@@ -14,6 +14,7 @@ type WiclaxStatus = {
   source: string;
   pool_size: number;
   pool_free: number;
+  pool_exhausted: boolean;
 };
 
 function CopyValue({ label, value }: { label: string; value: string }) {
@@ -145,11 +146,16 @@ export function WiclaxPanel({ checkpointId }: { checkpointId: string }) {
             Pool: {status?.pool_free ?? "—"} livres de {status?.pool_size ?? "—"}. Ao conectar, o
             sistema reserva a próxima porta disponível.
           </p>
+          {status?.pool_exhausted && (
+            <p role="alert" className="error">
+              Não há portas livres no pool. Peça ao Super Admin para ampliar ou limpar bloqueios.
+            </p>
+          )}
           <div className="wiclax-actions">
             <button
               type="button"
               className="primary"
-              disabled={busy}
+              disabled={busy || !!status?.pool_exhausted}
               onClick={() => void connect()}
             >
               {busy ? "Abrindo…" : "Conectar"}

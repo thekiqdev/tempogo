@@ -3762,6 +3762,34 @@ p {
   color: var(--platform-muted);
   font-size: 14px;
 }
+.wiclax-pool-table-wrap {
+  overflow: auto;
+  margin: 12px 0 16px;
+  border: 1px solid var(--platform-border, #d7e3e9);
+  border-radius: 12px;
+}
+.wiclax-pool-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.wiclax-pool-table th,
+.wiclax-pool-table td {
+  padding: 8px 12px;
+  text-align: left;
+  border-bottom: 1px solid #e4eaee;
+  vertical-align: top;
+}
+.wiclax-pool-table th {
+  background: #f7fafb;
+  font-weight: 700;
+}
+.wiclax-pool-table tr.is-busy td {
+  background: #f1faf5;
+}
+.wiclax-pool-table tr.is-blocked td {
+  background: #fff6f4;
+}
 .platform-logo-preview {
   background: #102530;
   border-radius: 12px;

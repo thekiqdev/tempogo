@@ -37,4 +37,5 @@ test("status inicial de checkpoint sem bridge ativo", async () => {
   assert.equal(s.clients, 0);
   assert.ok(Array.isArray(s.addresses));
   assert.ok(s.pool_size >= 1);
+  assert.equal(typeof s.pool_exhausted, "boolean");
 });

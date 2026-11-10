@@ -4,6 +4,7 @@ import { readConfig } from "./config.js";
 import { mailSender } from "./mail.js";
 import { platformMailSender } from "./platform-mail.js";
 import { assertPlatformRole, assertRuntimeRole } from "./runtime-role.js";
+import { ensureWiclaxRestored } from "./wiclax-manager.js";
 
 const config = readConfig(process.env);
 const pool = new pg.Pool({
@@ -62,6 +63,9 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
 try {
   await assertRuntimeRole(pool);
   if (platformPool) await assertPlatformRole(platformPool);
+  await ensureWiclaxRestored(pool).catch((err) =>
+    app.log.warn({ err }, "Não foi possível restaurar bridges Wiclax persistidos"),
+  );
   await app.listen({ port: config.port, host: config.host });
 } catch {
   app.log.error("Não foi possível iniciar a API");
