@@ -60,7 +60,13 @@ function situationLabel(status: WiclaxStatus) {
   return "Aguardando o Wiclax conectar";
 }
 
-export function WiclaxPanel({ eventId }: { eventId: string }) {
+export function WiclaxPanel({
+  eventId,
+  highlightCheckpointId,
+}: {
+  eventId: string;
+  highlightCheckpointId?: string;
+}) {
   const [status, setStatus] = useState<WiclaxStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -117,6 +123,9 @@ export function WiclaxPanel({ eventId }: { eventId: string }) {
   const primary = addresses[0];
   const active = !!status?.active;
   const sources = status?.sources ?? [];
+  const current = highlightCheckpointId
+    ? sources.find((s) => s.id === highlightCheckpointId)
+    : undefined;
 
   return (
     <article className={"wiclax-card" + (active ? " is-active" : "")}>
@@ -124,9 +133,8 @@ export function WiclaxPanel({ eventId }: { eventId: string }) {
         <div>
           <h4>Wiclax</h4>
           <p>
-            {active
-              ? "No Wiclax, use o Source igual ao nome de cada checkpoint."
-              : "Abra a conexão deste evento. Os checkpoints são diferenciados pelo Source."}
+            Uma porta para o evento. No Wiclax, cada destino usa o Source igual ao nome do
+            checkpoint.
           </p>
         </div>
         <p className={"wiclax-state" + (active ? " is-on" : "")} role="status">
@@ -140,10 +148,20 @@ export function WiclaxPanel({ eventId }: { eventId: string }) {
         </p>
       )}
 
+      {current && (
+        <div className="wiclax-current-source">
+          <CopyValue label="Source deste checkpoint" value={current.name} />
+          <p className="field-help">
+            Cadastre no Wiclax um destino com este Source. As passagens deste ponto vão para ele.
+          </p>
+        </div>
+      )}
+
       {!active ? (
         <div className="wiclax-setup">
           <p className="field-help">
-            Ao conectar, o TempoGo abre a ponte deste evento. IP e porta aparecem só depois.
+            Ao conectar, o TempoGo abre a ponte do evento (porta 3097). IP e porta aparecem só
+            depois.
           </p>
           <div className="wiclax-actions">
             <button
@@ -189,10 +207,11 @@ export function WiclaxPanel({ eventId }: { eventId: string }) {
         ) : (
           <ul>
             {sources.map((s) => (
-              <li key={s.id}>
+              <li key={s.id} className={s.id === highlightCheckpointId ? "is-current" : undefined}>
                 <code>{s.name}</code>
                 <span>
                   {kindLabel[s.kind] ?? s.kind} · ordem {s.sequence}
+                  {s.id === highlightCheckpointId ? " · este ponto" : ""}
                 </span>
               </li>
             ))}
@@ -203,11 +222,19 @@ export function WiclaxPanel({ eventId }: { eventId: string }) {
   );
 }
 
-export function IntegrationsAccordion({ eventId }: { eventId: string }) {
+export function IntegrationsAccordion({
+  eventId,
+  highlightCheckpointId,
+  defaultOpen = false,
+}: {
+  eventId: string;
+  highlightCheckpointId?: string;
+  defaultOpen?: boolean;
+}) {
   return (
-    <details className="integrations-accordion">
+    <details className="integrations-accordion" open={defaultOpen || undefined}>
       <summary>Integrações</summary>
-      <WiclaxPanel eventId={eventId} />
+      <WiclaxPanel eventId={eventId} highlightCheckpointId={highlightCheckpointId} />
     </details>
   );
 }

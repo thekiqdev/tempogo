@@ -1659,6 +1659,10 @@ p {
   border-radius: 10px;
   background: #fff;
 }
+.wiclax-sources li.is-current {
+  border-color: #1f7a4d;
+  background: #f1faf5;
+}
 .wiclax-sources code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 14px;
@@ -1667,6 +1671,14 @@ p {
 .wiclax-sources span {
   color: #4d5b63;
   font-size: 13px;
+}
+.wiclax-current-source {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #cfe3d7;
+  border-radius: 12px;
+  background: #f1faf5;
 }
 .admin-more > button {
   background: white;
