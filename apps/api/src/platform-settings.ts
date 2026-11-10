@@ -5,7 +5,7 @@ import { transaction } from "./db.js";
 import type { PlatformOptions } from "./platform.js";
 import { failure, managementAudit, type PlatformGuard } from "./platform-management.js";
 import { clearWiclaxBlockedPorts, wiclaxPoolSnapshot } from "./wiclax-manager.js";
-import { DEFAULT_WICLAX_PORTS, formatWiclaxPortPool, parseWiclaxPortPool } from "./wiclax-ports.js";
+import { formatWiclaxPortPool, parseWiclaxPortPool } from "./wiclax-ports.js";
 
 export async function platformSettings(c: pg.PoolClient) {
   const row = (
@@ -18,9 +18,9 @@ export async function platformSettings(c: pg.PoolClient) {
     version: number;
     wiclax_ports: number[] | null;
   };
-  const ports = row.wiclax_ports?.length
-    ? [...new Set(row.wiclax_ports)].sort((a, b) => a - b)
-    : [...DEFAULT_WICLAX_PORTS];
+  const ports = [
+    ...new Set((row.wiclax_ports ?? []).filter((p) => Number.isInteger(p) && p >= 1024 && p <= 65535)),
+  ].sort((a, b) => a - b);
   return {
     logo_data_url: row.logo_data_url,
     mfa_required: row.mfa_required,
@@ -98,7 +98,7 @@ export function registerPlatformSettings(
       })
       .strict()
       .parse(req.body);
-    return transaction(o.pool, async (c) => {
+    const saved = await transaction(o.pool, async (c) => {
       const s = await guard(req, c, true);
       const old = (await c.query("SELECT * FROM app.platform_settings WHERE singleton FOR UPDATE"))
         .rows[0];
@@ -125,12 +125,16 @@ export function registerPlatformSettings(
           wiclax_ports_count: input.wiclax_ports.length,
         },
       );
-      const settings = await platformSettings(c);
       return {
-        ...settings,
-        wiclax_pool: await wiclaxPoolSnapshot(o.pool, { restore: false }),
+        settings: await platformSettings(c),
         requires_login: input.mfa_required && s.mfa_authenticated === false,
       };
     });
+    // Snapshot depois do COMMIT para refletir o pool gravado (outra conexão).
+    return {
+      ...saved.settings,
+      wiclax_pool: await wiclaxPoolSnapshot(o.pool, { restore: false }),
+      requires_login: saved.requires_login,
+    };
   });
 }

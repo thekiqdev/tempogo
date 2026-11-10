@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { getWiclaxStatus, lanAddresses } from "../../apps/api/src/wiclax-manager.js";
+import type pg from "pg";
+import {
+  getWiclaxStatus,
+  lanAddresses,
+  loadWiclaxPortPool,
+} from "../../apps/api/src/wiclax-manager.js";
 import { formatWiclaxPortPool, parseWiclaxPortPool } from "../../apps/api/src/wiclax-ports.js";
 
 test("lanAddresses retorna apenas IPv4 públicos da máquina ou lista vazia", () => {
@@ -38,4 +43,27 @@ test("status inicial de checkpoint sem bridge ativo", async () => {
   assert.ok(Array.isArray(s.addresses));
   assert.ok(s.pool_size >= 1);
   assert.equal(typeof s.pool_exhausted, "boolean");
+});
+
+test("loadWiclaxPortPool usa exatamente as portas cadastradas, em ordem", async () => {
+  const pool = {
+    query: async () => ({ rows: [{ wiclax_ports: [3052, 3050, 3050, 3051] }] }),
+  } as unknown as pg.Pool;
+  assert.deepEqual(await loadWiclaxPortPool(pool), [3050, 3051, 3052]);
+});
+
+test("loadWiclaxPortPool não inventa o default quando o cadastro está vazio", async () => {
+  const pool = {
+    query: async () => ({ rows: [{ wiclax_ports: [] }] }),
+  } as unknown as pg.Pool;
+  assert.deepEqual(await loadWiclaxPortPool(pool), []);
+});
+
+test("loadWiclaxPortPool falha em vez de inventar portas se a leitura quebrar", async () => {
+  const pool = {
+    query: async () => {
+      throw new Error("permission denied for column singleton");
+    },
+  } as unknown as pg.Pool;
+  await assert.rejects(() => loadWiclaxPortPool(pool), /Não foi possível ler o pool/);
 });

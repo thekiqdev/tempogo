@@ -89,19 +89,32 @@ export function lanAddresses(env: NodeJS.ProcessEnv = process.env): string[] {
 }
 
 export async function loadWiclaxPortPool(pool: pg.Pool): Promise<number[]> {
+  let row: { wiclax_ports: number[] | null } | undefined;
   try {
-    const row = (
+    row = (
       await pool.query<{ wiclax_ports: number[] | null }>(
         "SELECT wiclax_ports FROM app.platform_settings WHERE singleton",
       )
     ).rows[0];
-    const ports = (row?.wiclax_ports ?? []).filter(
-      (p) => Number.isInteger(p) && p >= 1024 && p <= 65535,
-    );
-    return ports.length ? [...new Set(ports)].sort((a, b) => a - b) : [...DEFAULT_WICLAX_PORTS];
   } catch {
-    return [...DEFAULT_WICLAX_PORTS];
+    throw new HttpError(
+      500,
+      "WICLAX_POOL_UNAVAILABLE",
+      "Não foi possível ler o pool de portas Wiclax cadastrado. Verifique permissões e migrations.",
+    );
   }
+  if (!row) {
+    throw new HttpError(
+      500,
+      "WICLAX_POOL_UNAVAILABLE",
+      "Pool de portas Wiclax não encontrado nas configurações da plataforma.",
+    );
+  }
+  return [
+    ...new Set(
+      (row.wiclax_ports ?? []).filter((p) => Number.isInteger(p) && p >= 1024 && p <= 65535),
+    ),
+  ].sort((a, b) => a - b);
 }
 
 async function loadLeases(pool: pg.Pool): Promise<LeaseRow[]> {
