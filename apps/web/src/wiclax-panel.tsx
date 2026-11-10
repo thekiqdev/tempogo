@@ -62,7 +62,6 @@ function situationLabel(status: WiclaxStatus) {
 
 export function WiclaxPanel({ eventId }: { eventId: string }) {
   const [status, setStatus] = useState<WiclaxStatus | null>(null);
-  const [port, setPort] = useState("3097");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -73,7 +72,6 @@ export function WiclaxPanel({ eventId }: { eventId: string }) {
         .then((s) => {
           if (!active) return;
           setStatus(s);
-          if (s.port) setPort(String(s.port));
           setError("");
         })
         .catch((e: Error) => {
@@ -91,12 +89,11 @@ export function WiclaxPanel({ eventId }: { eventId: string }) {
     setBusy(true);
     setError("");
     try {
-      const parsed = Number(port);
-      const s = await api<WiclaxStatus>("/events/" + eventId + "/wiclax/connect", "POST", {
-        port: Number.isFinite(parsed) ? parsed : 3097,
-      });
-      setStatus(s);
-      if (s.port) setPort(String(s.port));
+      setStatus(
+        await api<WiclaxStatus>("/events/" + eventId + "/wiclax/connect", "POST", {
+          port: 3097,
+        }),
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha ao conectar");
     } finally {
@@ -128,8 +125,8 @@ export function WiclaxPanel({ eventId }: { eventId: string }) {
           <h4>Wiclax</h4>
           <p>
             {active
-              ? "Uma porta para o evento. No Wiclax, use o Source igual ao nome de cada checkpoint."
-              : "Abra uma conexão deste evento. Os checkpoints são diferenciados pelo Source."}
+              ? "No Wiclax, use o Source igual ao nome de cada checkpoint."
+              : "Abra a conexão deste evento. Os checkpoints são diferenciados pelo Source."}
           </p>
         </div>
         <p className={"wiclax-state" + (active ? " is-on" : "")} role="status">
@@ -145,18 +142,8 @@ export function WiclaxPanel({ eventId }: { eventId: string }) {
 
       {!active ? (
         <div className="wiclax-setup">
-          <label className="wiclax-port-field">
-            <span>Porta</span>
-            <input
-              inputMode="numeric"
-              value={port}
-              aria-describedby="wiclax-port-help"
-              onChange={(e) => setPort(e.target.value.replace(/\D/g, "").slice(0, 5))}
-              disabled={busy}
-            />
-          </label>
-          <p className="field-help" id="wiclax-port-help">
-            Use a mesma porta no Wiclax. Em produção, publique esta porta TCP na VPS.
+          <p className="field-help">
+            Ao conectar, o TempoGo abre a ponte deste evento. IP e porta aparecem só depois.
           </p>
           <div className="wiclax-actions">
             <button
